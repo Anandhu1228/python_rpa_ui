@@ -45,6 +45,65 @@ function moveStep(id, dir) {
   renderFlowSteps();
 }
 
+// ── In-Flow Inspection ──────────────────────────────────────
+
+async function inspectStepInFlow(stepId) {
+  const step = flowSteps.find(s => s._id === stepId);
+  if (!step.url) { alert('Please enter a URL for this step first.'); return; }
+  
+  const btn = document.getElementById(`btn-ins-${stepId}`);
+  const oldText = btn.innerHTML;
+  btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:middle;"></span> Inspecting...';
+  btn.disabled = true;
+
+  try {
+    // Format recipe login steps to match what the API expects
+    const loginPayload = recipeLoginSteps.map(s => ({
+      url: s.url,
+      fields: s.fields.map(f => ({
+        selector: f.selector,
+        field_type: f.field_type,
+        literal_value: f.literal_value
+      })),
+      submit_selector: s.submit_selector,
+      wait_for_url: s.wait_for_url
+    }));
+
+    const result = await API.inspect(step.url, loginPayload);
+    
+    // Convert inspection result to field mappings
+    const mappings = [];
+    
+    for (const f of (result.inputs || [])) {
+      if (f.type === 'hidden') continue;
+      const selector = f.name ? `input[name="${f.name}"]` : (f.id ? `#${f.id}` : '');
+      if (!selector) continue;
+      let ft = f.type;
+      if (!['text','password','email','tel','number','radio','checkbox'].includes(ft)) ft = 'text';
+      mappings.push({ _id: Date.now() + Math.random(), selector, field_type: ft, radio_name: ft === 'radio' ? (f.name || '') : '', source: 'csv_column', csv_column: '', literal_value: '', label: f.placeholder || f.name || selector, value_map: [] });
+    }
+    for (const s of (result.selects || [])) {
+      const selector = s.name ? `select[name="${s.name}"]` : (s.id ? `#${s.id}` : '');
+      if (!selector) continue;
+      mappings.push({ _id: Date.now() + Math.random(), selector, field_type: 'select', source: 'csv_column', csv_column: '', literal_value: '', label: s.name || selector, value_map: [] });
+    }
+    for (const t of (result.textareas || [])) {
+      const selector = t.name ? `textarea[name="${t.name}"]` : (t.id ? `#${t.id}` : '');
+      if (!selector) continue;
+      mappings.push({ _id: Date.now() + Math.random(), selector, field_type: 'textarea', source: 'csv_column', csv_column: '', literal_value: '', label: t.placeholder || t.name || selector, value_map: [] });
+    }
+
+    // Append to step
+    step.field_mappings.push(...mappings);
+    renderFlowSteps();
+    
+  } catch (e) {
+    alert('Inspection failed: ' + e.message);
+  } finally {
+    if(btn) { btn.innerHTML = oldText; btn.disabled = false; }
+  }
+}
+
 // ── Mapping management ──────────────────────────────────────
 
 function addMapping(stepId) {
@@ -59,6 +118,7 @@ function addMapping(stepId) {
     csv_column: '',
     literal_value: '',
     label: '',
+    value_map: [],
   });
   renderFlowSteps();
 }
@@ -75,6 +135,36 @@ function updateMapping(stepId, mid, key, val) {
   if (m) m[key] = val;
   // re-render only if source changes (to show/hide columns)
   if (key === 'source' || key === 'field_type') renderFlowSteps();
+}
+
+// ── Value Map management ────────────────────────────────────
+
+function addValueMap(stepId, mappingId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s.field_mappings.find(m => m._id === mappingId);
+  if (m) {
+    if (!m.value_map) m.value_map = [];
+    m.value_map.push({ _id: Date.now() + Math.random(), from_val: '', to_val: '' });
+    renderFlowSteps();
+  }
+}
+
+function updateValueMap(stepId, mappingId, vmId, key, val) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s.field_mappings.find(m => m._id === mappingId);
+  if (m && m.value_map) {
+    const vm = m.value_map.find(v => v._id === vmId);
+    if (vm) vm[key] = val;
+  }
+}
+
+function removeValueMap(stepId, mappingId, vmId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s.field_mappings.find(m => m._id === mappingId);
+  if (m && m.value_map) {
+    m.value_map = m.value_map.filter(v => v._id !== vmId);
+    renderFlowSteps();
+  }
 }
 
 // ── Recipe login steps (in flow builder) ───────────────────
@@ -199,7 +289,6 @@ function renderFlowSteps() {
         </div>
       </div>
       <div class="flow-step-body ${step._open ? 'open' : ''}">
-        <!-- Step config -->
         <div class="form-grid" style="margin-bottom:1rem">
           <div class="form-group">
             <label>Step Label</label>
@@ -208,9 +297,12 @@ function renderFlowSteps() {
           </div>
           <div class="form-group">
             <label>URL to navigate to</label>
-            <input class="input" type="url" value="${esc(step.url)}"
-              placeholder="Leave blank to stay on current page"
-              onchange="updateStep('${step._id}','url',this.value)">
+            <div class="row gap-sm">
+              <input class="input flex-1" type="url" value="${esc(step.url)}"
+                placeholder="Leave blank to stay on current page"
+                onchange="updateStep('${step._id}','url',this.value)">
+              <button id="btn-ins-${step._id}" class="btn btn-primary btn-sm" onclick="inspectStepInFlow('${step._id}')">🔍 Auto-Extract Fields</button>
+            </div>
           </div>
           <div class="form-group">
             <label>Submit selector</label>
@@ -239,12 +331,12 @@ function renderFlowSteps() {
           </div>
         </div>
 
-        <!-- Field mappings -->
         <div style="margin-bottom:.5rem;font-size:.82rem;font-weight:600;color:var(--text2)">Field Mappings</div>
-        <div style="display:grid;grid-template-columns:180px 120px 1fr 36px;gap:.35rem;margin-bottom:.35rem;padding:0 .1rem">
+        <div style="display:grid;grid-template-columns:180px 120px 1fr auto auto;gap:.35rem;margin-bottom:.35rem;padding:0 .1rem">
           <span style="font-size:.73rem;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Selector</span>
           <span style="font-size:.73rem;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">Field Type</span>
           <span style="font-size:.73rem;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px">CSV Column / Literal Value</span>
+          <span></span>
           <span></span>
         </div>
 
@@ -258,6 +350,22 @@ function renderFlowSteps() {
 
 function renderMappingRow(stepId, m) {
   const ftypes = ['text','password','email','tel','number','textarea','select','radio','checkbox','click'];
+  
+  let valueMapHtml = '';
+  if (m.value_map && m.value_map.length > 0) {
+    valueMapHtml = `<div style="grid-column:1/-1; padding: .5rem; background: var(--bg); border-radius: var(--radius-sm); margin-bottom:.5rem;">
+      <div style="font-size:.75rem; color:var(--text3); margin-bottom:.3rem;">Value Mapping (If CSV matches 'From', replace with 'To')</div>
+      ${m.value_map.map(vm => `
+        <div class="row gap-sm" style="margin-bottom:.3rem">
+          <input class="input" style="font-size:.8rem" placeholder="From (e.g. Male)" value="${esc(vm.from_val)}" onchange="updateValueMap('${stepId}',${m._id},${vm._id},'from_val',this.value)">
+          <span style="color:var(--text3)">→</span>
+          <input class="input" style="font-size:.8rem" placeholder="To (e.g. male)" value="${esc(vm.to_val)}" onchange="updateValueMap('${stepId}',${m._id},${vm._id},'to_val',this.value)">
+          <button class="btn btn-sm btn-danger" onclick="removeValueMap('${stepId}',${m._id},${vm._id})">✕</button>
+        </div>
+      `).join('')}
+    </div>`;
+  }
+
   return `
     <div class="mapping-row" id="mrow-${m._id}">
       <input class="input" placeholder='[name="field"] or #id'
@@ -268,6 +376,7 @@ function renderMappingRow(stepId, m) {
         ${ftypes.map(t => `<option value="${t}" ${m.field_type===t?'selected':''}>${t}</option>`).join('')}
       </select>
       ${renderMappingValue(stepId, m)}
+      <button class="btn btn-sm btn-ghost" onclick="addValueMap('${stepId}',${m._id})" title="Add inline mapping">🔀</button>
       <button class="btn btn-sm btn-danger" onclick="removeMapping('${stepId}',${m._id})">✕</button>
     </div>
     ${m.field_type === 'radio' ? `
@@ -277,6 +386,7 @@ function renderMappingRow(stepId, m) {
         value="${esc(m.radio_name||'')}"
         onchange="updateMapping('${stepId}',${m._id},'radio_name',this.value)">
     </div>` : ''}
+    ${valueMapHtml}
   `;
 }
 
@@ -360,6 +470,7 @@ function buildRecipePayload() {
       csv_column: m.csv_column || '',
       literal_value: m.literal_value || '',
       label: m.label || m.selector,
+      value_map: (m.value_map || []).map(v => ({ from_val: v.from_val, to_val: v.to_val }))
     })),
     submit_selector: s.submit_selector || '',
     wait_for_url: s.wait_for_url || '',
@@ -409,7 +520,9 @@ function loadRecipeIntoFlow(recipe) {
     _id: s.step_id || ('step_' + Date.now() + si),
     _open: false,
     field_mappings: (s.field_mappings || []).map(m => ({
-      ...m, _id: Date.now() + Math.random(),
+      ...m, 
+      _id: Date.now() + Math.random(),
+      value_map: m.value_map || [] 
     })),
   }));
   renderFlowSteps();

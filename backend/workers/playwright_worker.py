@@ -60,14 +60,24 @@ def resolve_value(mapping: Dict, row: Dict[str, str]) -> str:
       - source: "csv_column" | "literal"
       - csv_column: str  (header name from file)
       - literal_value: str
+      - value_map: List[Dict] (from_val -> to_val)
     Returns the resolved string value for this row.
     """
     source = mapping.get("source", "csv_column")
     if source == "literal":
-        return mapping.get("literal_value", "")
-    # csv_column
-    col = mapping.get("csv_column", "")
-    return row.get(col, "").strip()
+        val = mapping.get("literal_value", "")
+    else:
+        col = mapping.get("csv_column", "")
+        val = row.get(col, "").strip()
+
+    # Apply inline data transformations
+    value_map = mapping.get("value_map", [])
+    if value_map:
+        for vmap in value_map:
+            if val == vmap.get("from_val"):
+                return vmap.get("to_val")
+
+    return val
 
 
 def human_delay(ms: int, jitter_pct: float = 0.2):
@@ -91,7 +101,7 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict):
     char_delay = delay.get("char_delay_ms", 0)
     action_to  = delay.get("action_timeout_ms", 8000)
 
-    if not value and field_type not in ("checkbox",):
+    if not value and field_type not in ("checkbox", "click"):
         return  # nothing to fill
 
     try:
@@ -388,3 +398,4 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
         log(job_id, traceback.format_exc())
         job_store.set_status(job_id, "error")
         job_store.set_summary(job_id, {"error": str(e)})
+        

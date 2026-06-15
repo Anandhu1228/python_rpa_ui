@@ -151,13 +151,13 @@ function renderInspectResults(result, url) {
   // Selects
   for (const s of (result.selects || [])) {
     const selectorCss = s.name ? `select[name="${s.name}"]` : (s.id ? `#${s.id}` : '?');
-    const optLabels = (s.options || []).slice(1, 6).map(o => `<span>${esc(o.text)}</span>`).join('');
+    const optLabels = (s.options || []).slice(1, 6).map(o => `<div><span style="color:var(--text)">${esc(o.text)}</span> <span style="color:var(--text3); font-size:.75rem">val: <b>${esc(o.value)}</b></span></div>`).join('');
     rows.push(`
       <tr>
         <td><span class="type-tag t-select">select</span></td>
         <td><code>${esc(s.name || '')}</code></td>
         <td><code>${esc(s.id || '')}</code></td>
-        <td><div class="options-list">${optLabels}${s.options.length > 6 ? `<span>+${s.options.length - 6} more</span>` : ''}</div></td>
+        <td><div class="options-list">${optLabels}${s.options.length > 6 ? `<div>+${s.options.length - 6} more</div>` : ''}</div></td>
         <td><code>${esc(selectorCss)}</code></td>
         <td></td>
       </tr>
@@ -245,6 +245,7 @@ function useInspectInFlow() {
       csv_column: '',
       literal_value: '',
       label: f.placeholder || f.name || selector,
+      value_map: [],
     });
   }
 
@@ -260,6 +261,7 @@ function useInspectInFlow() {
       literal_value: '',
       label: s.name || selector,
       options: s.options,
+      value_map: [],
     });
   }
 
@@ -271,6 +273,7 @@ function useInspectInFlow() {
       selector, field_type: 'textarea',
       source: 'csv_column', csv_column: '', literal_value: '',
       label: t.placeholder || t.name || selector,
+      value_map: [],
     });
   }
 
