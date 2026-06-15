@@ -216,3 +216,38 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ==========================================
+# Custom Additions for python_rpa_ui
+# ==========================================
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDEs (Uncomment these if you use VS Code or PyCharm)
+.vscode/
+.idea/
+
+# RPA Automation Outputs (Adjust these folder names to match your project)
+logs/
+screenshots/
+output_data/
+downloads/
+*.log
+
+# Webdrivers & Browser binaries
+drivers/
+*.exe
+*.dll
+
+# Frontend UI (Uncomment if your web UI uses Node.js/React/Vue/etc.)
+# node_modules/
+# .next/
+# out/
+
