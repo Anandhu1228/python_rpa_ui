@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPA Studio</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ── Sidebar ───────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <span class="brand-icon">⚡</span>
+    <span class="brand-name">RPA Studio</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="#" class="nav-item active" data-tab="inspector">
+      <span class="nav-icon">🔍</span> Inspector
+    </a>
+    <a href="#" class="nav-item" data-tab="flow">
+      <span class="nav-icon">🗺</span> Flow Builder
+    </a>
+    <a href="#" class="nav-item" data-tab="recipes">
+      <span class="nav-icon">📋</span> Recipes
+    </a>
+    <a href="#" class="nav-item" data-tab="run">
+      <span class="nav-icon">▶</span> Run
+    </a>
+    <a href="#" class="nav-item" data-tab="logs">
+      <span class="nav-icon">📜</span> Logs
+    </a>
+  </nav>
+  <div class="sidebar-footer">v1.0 · Playwright</div>
+</aside>
+
+<!-- ── Main content ──────────────────────────────────────── -->
+<main class="main">
+
+  <!-- ══ INSPECTOR TAB ════════════════════════════════════ -->
+  <section id="tab-inspector" class="tab active">
+    <div class="tab-header">
+      <h1>Inspector</h1>
+      <p class="tab-sub">Point at any page — with or without login — and extract all fields automatically.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Target URL</div>
+      <div class="row gap-sm">
+        <input id="inspect-url" type="url" class="input flex-1" placeholder="https://example.com/signup/">
+        <button id="btn-inspect" class="btn btn-primary" onclick="runInspect()">Inspect</button>
+      </div>
+    </div>
+
+    <!-- Login steps builder -->
+    <div class="card">
+      <div class="card-title row">
+        <span>Login Steps <span class="badge">optional</span></span>
+        <button class="btn btn-sm btn-ghost" onclick="addLoginStep()">+ Add Step</button>
+      </div>
+      <p class="hint">If the target URL redirects to a login page, add login steps here. These run once before inspection.</p>
+      <div id="login-steps-list"></div>
+    </div>
+
+    <!-- Inspector results -->
+    <div id="inspect-results" class="hidden">
+      <div class="card">
+        <div class="card-title row">
+          <span>Discovered Fields</span>
+          <span id="inspect-url-badge" class="badge badge-blue"></span>
+        </div>
+        <p class="hint">These are all fields found on the page. Use them in the Flow Builder to map CSV columns.</p>
+        <div id="fields-table-wrap"></div>
+      </div>
+    </div>
+
+    <div id="inspect-spinner" class="spinner-wrap hidden">
+      <div class="spinner"></div>
+      <span>Inspecting page…</span>
+    </div>
+  </section>
+
+  <!-- ══ FLOW BUILDER TAB ══════════════════════════════════ -->
+  <section id="tab-flow" class="tab">
+    <div class="tab-header">
+      <h1>Flow Builder</h1>
+      <p class="tab-sub">Define the sequence of pages and actions. Each step = one page form.</p>
+    </div>
+
+    <!-- Recipe meta -->
+    <div class="card">
+      <div class="card-title">Recipe Info</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Recipe Name</label>
+          <input id="recipe-name" type="text" class="input" placeholder="e.g. User Registration Flow">
+        </div>
+        <div class="form-group">
+          <label>Base URL</label>
+          <input id="recipe-base-url" type="url" class="input" placeholder="https://rpatester.sahi1.in">
+        </div>
+        <div class="form-group" style="grid-column:1/-1">
+          <label>Description</label>
+          <input id="recipe-desc" type="text" class="input" placeholder="Optional description">
+        </div>
+      </div>
+    </div>
+
+    <!-- Delays config -->
+    <div class="card">
+      <div class="card-title">⏱ Timing & Delays</div>
+      <div class="form-grid cols-3">
+        <div class="form-group">
+          <label>Between Records (ms)</label>
+          <input id="d-records" type="number" class="input" value="800" min="0">
+          <span class="hint">Pause between each CSV row</span>
+        </div>
+        <div class="form-group">
+          <label>Between Fields (ms)</label>
+          <input id="d-fields" type="number" class="input" value="100" min="0">
+          <span class="hint">Pause between filling each field</span>
+        </div>
+        <div class="form-group">
+          <label>Between Steps (ms)</label>
+          <input id="d-steps" type="number" class="input" value="300" min="0">
+          <span class="hint">Pause between flow steps</span>
+        </div>
+        <div class="form-group">
+          <label>Char Typing Delay (ms)</label>
+          <input id="d-char" type="number" class="input" value="0" min="0">
+          <span class="hint">0 = instant fill. &gt;0 = type char-by-char</span>
+        </div>
+        <div class="form-group">
+          <label>Page Load Timeout (ms)</label>
+          <input id="d-page" type="number" class="input" value="15000" min="1000">
+        </div>
+        <div class="form-group">
+          <label>Action Timeout (ms)</label>
+          <input id="d-action" type="number" class="input" value="8000" min="1000">
+        </div>
+      </div>
+    </div>
+
+    <!-- Login steps for recipe -->
+    <div class="card">
+      <div class="card-title row">
+        <span>🔐 Login Steps <span class="badge">optional — run once</span></span>
+        <button class="btn btn-sm btn-ghost" onclick="addRecipeLoginStep()">+ Add Login Step</button>
+      </div>
+      <div id="recipe-login-steps"></div>
+    </div>
+
+    <!-- Flow steps -->
+    <div class="card">
+      <div class="card-title row">
+        <span>Flow Steps</span>
+        <button class="btn btn-sm btn-primary" onclick="addFlowStep()">+ Add Step</button>
+      </div>
+      <div id="flow-steps-list">
+        <div class="empty-state">No steps yet. Click "+ Add Step" to begin.</div>
+      </div>
+    </div>
+
+    <div class="row gap-sm" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="saveRecipe()">💾 Save Recipe</button>
+      <button class="btn btn-ghost" onclick="clearFlow()">🗑 Clear</button>
+      <span id="save-status" class="save-status"></span>
+    </div>
+  </section>
+
+  <!-- ══ RECIPES TAB ════════════════════════════════════════ -->
+  <section id="tab-recipes" class="tab">
+    <div class="tab-header">
+      <h1>Recipes</h1>
+      <p class="tab-sub">Saved automation configurations.</p>
+    </div>
+    <div id="recipes-list" class="recipe-grid">
+      <div class="empty-state">Loading recipes…</div>
+    </div>
+  </section>
+
+  <!-- ══ RUN TAB ════════════════════════════════════════════ -->
+  <section id="tab-run" class="tab">
+    <div class="tab-header">
+      <h1>Run</h1>
+      <p class="tab-sub">Select a recipe, upload your data file, and launch.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Select Recipe</div>
+      <select id="run-recipe-select" class="input">
+        <option value="">— choose a recipe —</option>
+      </select>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Data File</div>
+      <div class="file-drop" id="file-drop" onclick="document.getElementById('file-input').click()">
+        <div class="file-drop-icon">📂</div>
+        <div class="file-drop-label">Drop CSV or Excel file here, or click to browse</div>
+        <div id="file-drop-name" class="file-drop-name"></div>
+      </div>
+      <input id="file-input" type="file" accept=".csv,.xlsx,.xls" style="display:none" onchange="onFileSelect(this)">
+    </div>
+
+    <!-- CSV preview + column list -->
+    <div id="csv-preview-card" class="card hidden">
+      <div class="card-title row">
+        <span>Data Preview</span>
+        <span id="csv-row-count" class="badge badge-blue"></span>
+      </div>
+      <div id="csv-preview-table" class="table-wrap"></div>
+
+      <div style="margin-top:1rem">
+        <div class="card-title" style="font-size:.85rem">Detected Columns</div>
+        <div id="csv-columns-list" class="col-chips"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Row Range <span class="badge">optional</span></div>
+      <div class="row gap-sm">
+        <div class="form-group flex-1">
+          <label>Start Row</label>
+          <input id="run-start" type="number" class="input" value="1" min="1">
+        </div>
+        <div class="form-group flex-1">
+          <label>End Row (blank = all)</label>
+          <input id="run-end" type="number" class="input" placeholder="all">
+        </div>
+      </div>
+    </div>
+
+    <div class="row gap-sm" style="margin-top:1rem">
+      <button id="btn-run" class="btn btn-primary btn-lg" onclick="startRun()">▶ Start Run</button>
+      <div id="run-status-badge"></div>
+    </div>
+  </section>
+
+  <!-- ══ LOGS TAB ═══════════════════════════════════════════ -->
+  <section id="tab-logs" class="tab">
+    <div class="tab-header row">
+      <div>
+        <h1>Live Logs</h1>
+        <p class="tab-sub">Real-time output from the automation run.</p>
+      </div>
+      <div class="row gap-sm">
+        <button class="btn btn-sm btn-ghost" onclick="clearLogs()">Clear</button>
+        <button class="btn btn-sm btn-ghost" onclick="downloadLogs()">⬇ Download</button>
+        <label class="toggle-label">
+          <input type="checkbox" id="autoscroll-toggle" checked>
+          Auto-scroll
+        </label>
+      </div>
+    </div>
+
+    <!-- Progress bar -->
+    <div id="run-progress-card" class="card hidden">
+      <div class="card-title row">
+        <span id="progress-label">Running…</span>
+        <span id="progress-pct" class="badge badge-blue">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar" class="progress-bar-fill" style="width:0%"></div>
+      </div>
+      <div class="row gap-sm" style="margin-top:.5rem">
+        <span id="prog-success" class="badge badge-green">✅ 0</span>
+        <span id="prog-failed" class="badge badge-red">❌ 0</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding:0">
+      <div id="log-terminal" class="log-terminal"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Modals ─────────────────────────────────────────────── -->
+<div id="modal-overlay" class="modal-overlay hidden" onclick="closeModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <span id="modal-title">Edit Step</span>
+      <button class="btn btn-sm btn-ghost" onclick="closeModal()">✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
+      <button id="modal-save-btn" class="btn btn-primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/inspector.js"></script>
+<script src="/static/js/flow.js"></script>
+<script src="/static/js/recipes.js"></script>
+<script src="/static/js/runner.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

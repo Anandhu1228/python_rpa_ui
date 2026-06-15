@@ -1,0 +1,23 @@
+services:
+  rpa_studio:
+    build: .
+    container_name: rpa_studio
+    ipc: "host"           # needed by Chromium for shared memory
+    ports:
+      - "10090:10090"       # UI + API at http://localhost:10090
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+    volumes:
+      # Persist recipes and uploads across restarts
+      - ./storage/recipes:/app/storage/recipes
+      - ./storage/uploads:/app/storage/uploads
+      - ./storage/logs:/app/storage/logs
+      # Hot-reload frontend without rebuild (dev convenience)
+      - ./frontend:/app/frontend:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10090/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
