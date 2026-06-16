@@ -13,6 +13,7 @@ function switchTab(name) {
   if (name === 'recipes') loadRecipesList();
   if (name === 'run')     populateRunRecipeSelect();
   if (name === 'flow')    renderRecipeLoginSteps();
+  if (name === 'uploads') loadUploadsList();
 }
 
 document.querySelectorAll('.nav-item').forEach(item => {
@@ -46,6 +47,20 @@ function saveModal() {
 // ── Bootstrap ───────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  // Theme init
+  const savedTheme = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const newTheme = isDark ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+    });
+  }
+
   // Initialize empty renders
   renderLoginSteps();
   renderFlowSteps();

@@ -17,21 +17,52 @@ function onFileSelect(input) {
   parseAndPreviewFile(file);
 }
 
-// Drag-and-drop
-document.addEventListener('DOMContentLoaded', () => {
+// Drag-and-drop & Log persistence on load
+document.addEventListener('DOMContentLoaded', async () => {
   const drop = document.getElementById('file-drop');
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.background = 'var(--accent-dim)'; });
-  drop.addEventListener('dragleave', () => { drop.style.background = ''; });
-  drop.addEventListener('drop', e => {
-    e.preventDefault();
-    drop.style.background = '';
-    const file = e.dataTransfer.files[0];
-    if (file) {
-      selectedFile = file;
-      document.getElementById('file-drop-name').textContent = file.name;
-      parseAndPreviewFile(file);
+  if (drop) {
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.background = 'var(--accent-dim)'; });
+      drop.addEventListener('dragleave', () => { drop.style.background = ''; });
+      drop.addEventListener('drop', e => {
+        e.preventDefault();
+        drop.style.background = '';
+        const file = e.dataTransfer.files[0];
+        if (file) {
+          selectedFile = file;
+          document.getElementById('file-drop-name').textContent = file.name;
+          parseAndPreviewFile(file);
+        }
+      });
+  }
+
+  // Restore logs if page is refreshed
+  const savedJobId = sessionStorage.getItem('currentJobId');
+  if (savedJobId) {
+    currentJobId = savedJobId;
+    try {
+      const res = await API.getLogs(currentJobId);
+      if (res && res.logs) {
+        logBuffer = res.logs;
+        clearLogs();
+        logBuffer.forEach(line => appendLog(line, classifyLog(line)));
+        
+        if (res.status === 'running' || res.status === 'pending') {
+          startLogStream(currentJobId);
+        } else {
+          showProgressCard(true);
+          // Recalculate stats from buffer
+          runStats = { success: 0, failed: 0, total: res.summary ? (res.summary.success + res.summary.failed) : 0 };
+          logBuffer.forEach(line => {
+              if (line.includes('✅') || (line.includes('Row') && line.includes('done'))) runStats.success++;
+              if (line.includes('❌') || (line.includes('Row') && line.includes('failed'))) runStats.failed++;
+          });
+          onRunDone(res.status, res.summary);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not restore logs:", e);
     }
-  });
+  }
 });
 
 async function parseAndPreviewFile(file) {
@@ -123,16 +154,18 @@ async function startRun() {
 
   const btn = document.getElementById('btn-run');
   btn.disabled = true;
-  btn.textContent = '⏳ Starting…';
+  btn.textContent = 'Starting…';
 
   try {
     const result = await API.startRun(formData);
     currentJobId = result.job_id;
+    sessionStorage.setItem('currentJobId', currentJobId); // SAVE FOR PERSISTENCE
+
     logBuffer = [];
     runStats  = { success: 0, failed: 0, total: 0 };
 
     clearLogs();
-    appendLog(`🚀 Job ${currentJobId} started`, 'log-head');
+    appendLog(`Job ${currentJobId} started`, 'log-head');
     appendLog('', '');
     switchTab('logs');
     startLogStream(currentJobId);
@@ -140,7 +173,7 @@ async function startRun() {
   } catch (e) {
     alert('Failed to start run: ' + e.message);
     btn.disabled = false;
-    btn.textContent = '▶ Start Run';
+    btn.textContent = 'Start Run';
   }
 }
 
@@ -186,23 +219,23 @@ function updateProgressFromLine(line) {
     document.getElementById('progress-pct').textContent = pct + '%';
     document.getElementById('progress-label').textContent = `Processing ${cur} of ${total}…`;
   }
-  if (line.includes('✅')) { runStats.success++; document.getElementById('prog-success').textContent = `✅ ${runStats.success}`; }
-  if (line.includes('❌')) { runStats.failed++;  document.getElementById('prog-failed').textContent  = `❌ ${runStats.failed}`; }
+  if (line.includes('✅')) { runStats.success++; document.getElementById('prog-success').textContent = `${runStats.success}`; }
+  if (line.includes('❌')) { runStats.failed++;  document.getElementById('prog-failed').textContent  = `${runStats.failed}`; }
 }
 
 function onRunDone(status, summary) {
   const label = document.getElementById('progress-label');
   if (status === 'done') {
-    label.textContent = '✅ Run complete';
+    label.textContent = 'Run complete';
     document.getElementById('progress-bar').style.width = '100%';
     document.getElementById('progress-bar').style.background = 'var(--green)';
     document.getElementById('progress-pct').textContent = '100%';
     appendLog('', '');
-    appendLog('✅ Run completed.', 'log-ok');
+    appendLog('Run completed.', 'log-ok');
   } else {
-    label.textContent = '❌ Run ended with error';
+    label.textContent = 'Run ended with error';
     document.getElementById('progress-bar').style.background = 'var(--red)';
-    appendLog('❌ Run ended with error.', 'log-err');
+    appendLog('Run ended with error.', 'log-err');
   }
 
   if (summary) {
@@ -215,7 +248,7 @@ function onRunDone(status, summary) {
   }
 
   document.getElementById('btn-run').disabled = false;
-  document.getElementById('btn-run').textContent = '▶ Start Run';
+  document.getElementById('btn-run').textContent = 'Start Run';
 }
 
 // ── Log terminal UI ─────────────────────────────────────────
@@ -248,4 +281,38 @@ function downloadLogs() {
 
 function showProgressCard(show) {
   document.getElementById('run-progress-card').classList.toggle('hidden', !show);
+}
+
+// ── Uploads Tab UI ──────────────────────────────────────────
+
+async function loadUploadsList() {
+  const container = document.getElementById('uploads-list');
+  try {
+    const files = await API.listUploads();
+    if (!files.length) {
+      container.innerHTML = '<div class="empty-state">No files uploaded yet.</div>';
+      return;
+    }
+    container.innerHTML = files.map(f => `
+      <div class="recipe-card">
+        <div class="recipe-card-name">${esc(f.filename)}</div>
+        <div class="recipe-card-desc">Size: ${Math.round(f.size/1024)} KB</div>
+        <div class="row gap-sm" style="margin-top:.5rem">
+          <span class="badge">Job: ${esc(f.job_id)}</span>
+          <span class="badge badge-blue">Status: ${esc(f.job_status)}</span>
+        </div>
+        <div class="recipe-card-actions">
+          <button class="btn btn-sm btn-danger" onclick="deleteUploadFile('${f.filename}')">Delete</button>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Error loading uploads: ${e.message}</div>`;
+  }
+}
+
+async function deleteUploadFile(filename) {
+  if (!confirm(`Delete ${filename}?`)) return;
+  await API.deleteUpload(filename);
+  loadUploadsList();
 }

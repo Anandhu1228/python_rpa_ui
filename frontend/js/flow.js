@@ -1,7 +1,7 @@
 /* flow.js — Flow Builder tab */
 
-let flowSteps = [];           // array of step objects
-let editingRecipeId = null;   // when loading an existing recipe to edit
+let flowSteps = [];           
+let editingRecipeId = null;   
 
 // ── Step management ─────────────────────────────────────────
 
@@ -18,7 +18,7 @@ function addFlowStep() {
     wait_for_selector: '',
     skip_if_no_data: false,
     _open: true,
-    inspection_steps: [], // Added for in-flow inspection
+    inspection_steps: [], 
   });
   renderFlowSteps();
 }
@@ -197,7 +197,7 @@ function addMapping(stepId) {
     csv_column: '',
     literal_value: '',
     label: '',
-    value_map: [], // Added for inline mapping
+    value_map: [], 
   });
   renderFlowSteps();
 }
@@ -212,7 +212,6 @@ function updateMapping(stepId, mid, key, val) {
   if (!s) return;
   const m = s.field_mappings.find(m => m._id === mid);
   if (m) m[key] = val;
-  // re-render only if source changes (to show/hide columns)
   if (key === 'source' || key === 'field_type') renderFlowSteps();
 }
 
@@ -380,13 +379,13 @@ function renderFlowSteps() {
               <input class="input flex-1" type="url" value="${esc(step.url)}"
                 placeholder="Leave blank to stay on current page"
                 onchange="updateStep('${step._id}','url',this.value)">
-              <button id="btn-ins-${step._id}" class="btn btn-primary btn-sm" onclick="inspectStepInFlow('${step._id}')">🔍 Auto-Extract Fields</button>
+              <button id="btn-ins-${step._id}" class="btn btn-primary btn-sm" onclick="inspectStepInFlow('${step._id}')">Auto-Extract Fields</button>
             </div>
           </div>
           
           <div style="grid-column:1/-1; background: var(--bg); padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: .5rem;">
               <div class="row" style="justify-content:space-between; margin-bottom:.5rem;">
-                  <div style="font-size: .85rem; font-weight: 600; color: var(--accent);">🔍 Inspection Setup (Optional)</div>
+                  <div style="font-size: .85rem; font-weight: 600; color: var(--accent);">Inspection Setup (Optional)</div>
               </div>
               <p class="hint" style="margin-bottom: .5rem;">Define steps needed *just* to reach this page for inspection (e.g., logging in or clicking a menu). If the URL is directly accessible, leave this blank and just click Auto-Extract.</p>
               
@@ -423,6 +422,7 @@ function renderFlowSteps() {
               </div>
               <button class="btn btn-sm btn-ghost" onclick="addInspectionStep('${step._id}')">+ Add Pre-Navigation Step</button>
           </div>
+
           <div class="form-group">
             <label>Submit selector</label>
             <input class="input" value="${esc(step.submit_selector)}"
@@ -564,7 +564,7 @@ async function saveRecipe() {
       editingRecipeId = result.recipe_id;
     }
     const st = document.getElementById('save-status');
-    st.textContent = `✓ Saved as "${result.name}" (${result.recipe_id})`;
+    st.textContent = `Saved as "${result.name}" (${result.recipe_id})`;
     setTimeout(() => { st.textContent = ''; }, 4000);
     loadRecipesList();
     populateRunRecipeSelect();
@@ -672,6 +672,15 @@ function loadRecipeIntoFlow(recipe) {
   switchTab('flow');
 }
 
+function downloadCurrentRecipeJSON() {
+  const recipe = buildRecipePayload();
+  const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${recipe.name || 'recipe'}.json`;
+  a.click();
+}
+
 function clearFlow() {
   if (!confirm('Clear all flow steps?')) return;
   flowSteps = [];
@@ -682,4 +691,13 @@ function clearFlow() {
   document.getElementById('recipe-base-url').value = '';
   renderFlowSteps();
   renderRecipeLoginSteps();
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

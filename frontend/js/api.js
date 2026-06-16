@@ -87,4 +87,13 @@ const API = {
     ws.onerror = () => onDone('error', { error: 'WebSocket error' });
     return ws;
   },
+
+  async listUploads() {
+    const r = await fetch(`${API.BASE}/api/uploads`);
+    return r.json();
+  },
+
+  async deleteUpload(filename) {
+    await fetch(`${API.BASE}/api/uploads/${filename}`, { method: 'DELETE' });
+  }
 };

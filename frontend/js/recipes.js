@@ -20,6 +20,7 @@ async function loadRecipesList() {
         <div class="recipe-card-actions">
           <button class="btn btn-sm btn-primary" onclick="editRecipe('${r.recipe_id}')">✏ Edit</button>
           <button class="btn btn-sm btn-green"   onclick="runRecipeQuick('${r.recipe_id}')">▶ Run</button>
+          <button class="btn btn-sm btn-ghost"   onclick="downloadRecipe('${r.recipe_id}')">Download JSON</button>
           <button class="btn btn-sm btn-danger"  onclick="deleteRecipe('${r.recipe_id}')">🗑</button>
         </div>
       </div>
@@ -35,6 +36,19 @@ async function editRecipe(id) {
     loadRecipeIntoFlow(recipe);
   } catch (e) {
     alert('Could not load recipe: ' + e.message);
+  }
+}
+
+async function downloadRecipe(id) {
+  try {
+    const recipe = await API.getRecipe(id);
+    const blob = new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${recipe.name || 'recipe'}.json`;
+    a.click();
+  } catch (e) {
+     alert('Could not download recipe: ' + e.message);
   }
 }
 

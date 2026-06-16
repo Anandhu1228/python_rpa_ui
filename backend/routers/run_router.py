@@ -87,3 +87,33 @@ async def get_logs(job_id: str, since: int = 0):
         "status": job.status,
         "summary": job.summary,
     }
+
+
+@router.get("/uploads")
+async def list_uploads():
+    """List all uploaded data files for management UI."""
+    files = []
+    for f in UPLOADS_DIR.iterdir():
+        if f.is_file() and not f.name.startswith("."):
+            stat = f.stat()
+            job_id = f.stem
+            job = job_store.get(job_id)
+            job_status = job.status if job else "Unknown (archived)"
+            files.append({
+                "filename": f.name,
+                "size": stat.st_size,
+                "job_id": job_id,
+                "job_status": job_status
+            })
+    # Sort files by newest first
+    files.sort(key=lambda x: (UPLOADS_DIR / x["filename"]).stat().st_mtime, reverse=True)
+    return files
+
+
+@router.delete("/uploads/{filename}")
+async def delete_upload(filename: str):
+    """Delete a specific uploaded data file."""
+    p = UPLOADS_DIR / filename
+    if p.exists():
+        p.unlink()
+    return {"deleted": filename}
