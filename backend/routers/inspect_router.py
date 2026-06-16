@@ -99,8 +99,11 @@ with sync_playwright() as p:
     page = browser.new_page()
 
     for step in (login_steps or []):
-        page.goto(step["url"])
-        page.wait_for_load_state("networkidle")
+        step_url = step.get("url")
+        if step_url:
+            page.goto(step_url)
+            page.wait_for_load_state("networkidle")
+            
         for f in step.get("fields", []):
             try:
                 page.fill(f["selector"], f.get("literal_value", ""))

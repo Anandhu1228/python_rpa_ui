@@ -22,6 +22,10 @@ class FlowStep(BaseModel):
     url: str                          # page URL (can be relative)
     # Field mappings: { field_selector -> csv_column | literal_value }
     field_mappings: List[Dict[str, Any]] = []
+    
+    # NEW: Steps to execute just for the inspector to reach this page
+    inspection_steps: Optional[List[Dict[str, Any]]] = None
+    
     submit_selector: Optional[str] = None
     wait_for_url: Optional[str] = None      # URL substring to wait for after submit
     wait_for_selector: Optional[str] = None

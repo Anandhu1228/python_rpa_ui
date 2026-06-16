@@ -18,6 +18,7 @@ function addFlowStep() {
     wait_for_selector: '',
     skip_if_no_data: false,
     _open: true,
+    inspection_steps: [], // NEW
   });
   renderFlowSteps();
 }
@@ -45,6 +46,72 @@ function moveStep(id, dir) {
   renderFlowSteps();
 }
 
+// ── In-Flow Inspection Pre-Steps Management ─────────────────
+
+function addInspectionStep(stepId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  if (s) {
+    if (!s.inspection_steps) s.inspection_steps = [];
+    s.inspection_steps.push({
+      _id: Date.now() + Math.random(),
+      url: '',
+      fields: [],
+      submit_selector: '',
+      wait_for_url: ''
+    });
+    renderFlowSteps();
+  }
+}
+
+function removeInspectionStep(stepId, insStepId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  if (s && s.inspection_steps) {
+    s.inspection_steps = s.inspection_steps.filter(is => is._id !== insStepId);
+    renderFlowSteps();
+  }
+}
+
+function updateInspectionStep(stepId, insStepId, key, val) {
+  const s = flowSteps.find(s => s._id === stepId);
+  if (s && s.inspection_steps) {
+    const is = s.inspection_steps.find(i => i._id === insStepId);
+    if (is) is[key] = val;
+  }
+}
+
+function addInspectionField(stepId, insStepId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  if (s && s.inspection_steps) {
+    const is = s.inspection_steps.find(i => i._id === insStepId);
+    if (is) {
+      if (!is.fields) is.fields = [];
+      is.fields.push({ selector: '', literal_value: '' });
+      renderFlowSteps();
+    }
+  }
+}
+
+function updateInspectionField(stepId, insStepId, fi, key, val) {
+  const s = flowSteps.find(s => s._id === stepId);
+  if (s && s.inspection_steps) {
+    const is = s.inspection_steps.find(i => i._id === insStepId);
+    if (is && is.fields && is.fields[fi]) {
+      is.fields[fi][key] = val;
+    }
+  }
+}
+
+function removeInspectionField(stepId, insStepId, fi) {
+    const s = flowSteps.find(s => s._id === stepId);
+    if (s && s.inspection_steps) {
+        const is = s.inspection_steps.find(i => i._id === insStepId);
+        if (is && is.fields) {
+            is.fields.splice(fi, 1);
+            renderFlowSteps();
+        }
+    }
+}
+
 // ── In-Flow Inspection ──────────────────────────────────────
 
 async function inspectStepInFlow(stepId) {
@@ -57,19 +124,18 @@ async function inspectStepInFlow(stepId) {
   btn.disabled = true;
 
   try {
-    // Format recipe login steps to match what the API expects
-    const loginPayload = recipeLoginSteps.map(s => ({
-      url: s.url,
-      fields: s.fields.map(f => ({
-        selector: f.selector,
-        field_type: f.field_type,
-        literal_value: f.literal_value
-      })),
-      submit_selector: s.submit_selector,
-      wait_for_url: s.wait_for_url
+    // Format the specific inspection steps for this flow step
+    const inspectionPayload = (step.inspection_steps || []).map(is => ({
+        url: is.url,
+        fields: (is.fields || []).map(f => ({
+            selector: f.selector,
+            literal_value: f.literal_value
+        })),
+        submit_selector: is.submit_selector,
+        wait_for_url: is.wait_for_url
     }));
 
-    const result = await API.inspect(step.url, loginPayload);
+    const result = await API.inspect(step.url, inspectionPayload);
     
     // Convert inspection result to field mappings
     const mappings = [];
@@ -304,6 +370,49 @@ function renderFlowSteps() {
               <button id="btn-ins-${step._id}" class="btn btn-primary btn-sm" onclick="inspectStepInFlow('${step._id}')">🔍 Auto-Extract Fields</button>
             </div>
           </div>
+          
+          <!-- IN-FLOW INSPECTION SECTION -->
+          <div style="grid-column:1/-1; background: var(--bg); padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: .5rem;">
+              <div class="row" style="justify-content:space-between; margin-bottom:.5rem;">
+                  <div style="font-size: .85rem; font-weight: 600; color: var(--accent);">🔍 Inspection Setup (Optional)</div>
+              </div>
+              <p class="hint" style="margin-bottom: .5rem;">Define steps needed *just* to reach this page for inspection (e.g., logging in or clicking a menu). If the URL is directly accessible, leave this blank and just click Auto-Extract.</p>
+              
+              <div id="ins-steps-${step._id}">
+                  ${(step.inspection_steps || []).map((is, isi) => `
+                      <div style="background: var(--bg2); padding: .5rem; border-radius: var(--radius-sm); margin-bottom: .5rem; border: 1px solid var(--border2);">
+                           <div class="row" style="margin-bottom: .5rem;">
+                                <span class="badge">Pre-Step ${isi + 1}</span>
+                                <button class="btn btn-sm btn-danger" style="margin-left:auto;" onclick="removeInspectionStep('${step._id}', ${is._id})">✕</button>
+                           </div>
+                           <div class="form-grid">
+                               <div class="form-group">
+                                    <input class="input" placeholder="URL (e.g., /login)" value="${esc(is.url)}" onchange="updateInspectionStep('${step._id}', ${is._id}, 'url', this.value)">
+                               </div>
+                               <div class="form-group">
+                                    <input class="input" placeholder="Submit Selector" value="${esc(is.submit_selector)}" onchange="updateInspectionStep('${step._id}', ${is._id}, 'submit_selector', this.value)">
+                               </div>
+                               <div class="form-group" style="grid-column:1/-1;">
+                                    <input class="input" placeholder="Wait for URL containing..." value="${esc(is.wait_for_url)}" onchange="updateInspectionStep('${step._id}', ${is._id}, 'wait_for_url', this.value)">
+                               </div>
+                           </div>
+                           <div style="margin-top:.5rem;">
+                               ${(is.fields || []).map((f, fi) => `
+                                    <div class="row gap-sm" style="margin-bottom: .3rem;">
+                                        <input class="input flex-1" placeholder="Selector" value="${esc(f.selector)}" onchange="updateInspectionField('${step._id}', ${is._id}, ${fi}, 'selector', this.value)">
+                                        <input class="input flex-1" placeholder="Value (Literal)" value="${esc(f.literal_value)}" onchange="updateInspectionField('${step._id}', ${is._id}, ${fi}, 'literal_value', this.value)">
+                                        <button class="btn btn-sm btn-danger" onclick="removeInspectionField('${step._id}', ${is._id}, ${fi})">✕</button>
+                                    </div>
+                               `).join('')}
+                               <button class="btn btn-sm btn-ghost" onclick="addInspectionField('${step._id}', ${is._id})">+ Add Action</button>
+                           </div>
+                      </div>
+                  `).join('')}
+              </div>
+              <button class="btn btn-sm btn-ghost" onclick="addInspectionStep('${step._id}')">+ Add Pre-Navigation Step</button>
+          </div>
+          <!-- END IN-FLOW INSPECTION SECTION -->
+
           <div class="form-group">
             <label>Submit selector</label>
             <input class="input" value="${esc(step.submit_selector)}"
@@ -462,6 +571,12 @@ function buildRecipePayload() {
     step_id: s.step_id || s._id,
     label: s.label,
     url: s.url,
+    inspection_steps: (s.inspection_steps || []).map(is => ({
+       url: is.url,
+       fields: (is.fields || []).map(f => ({ selector: f.selector, literal_value: f.literal_value })),
+       submit_selector: is.submit_selector,
+       wait_for_url: is.wait_for_url
+    })),
     field_mappings: (s.field_mappings || []).map(m => ({
       selector: m.selector,
       field_type: m.field_type,
@@ -519,6 +634,11 @@ function loadRecipeIntoFlow(recipe) {
     ...s,
     _id: s.step_id || ('step_' + Date.now() + si),
     _open: false,
+    inspection_steps: (s.inspection_steps || []).map(is => ({
+      ...is,
+      _id: Date.now() + Math.random(),
+      fields: (is.fields || []).map(f => ({...f}))
+    })),
     field_mappings: (s.field_mappings || []).map(m => ({
       ...m, 
       _id: Date.now() + Math.random(),
