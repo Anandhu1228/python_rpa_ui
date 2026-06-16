@@ -90,6 +90,11 @@ async def get_logs(job_id: str, since: int = 0):
         "summary": job.summary,
     }
 
+@router.delete("/run/{job_id}")
+async def delete_run(job_id: str):
+    job_store.delete(job_id)
+    return {"deleted": job_id}
+
 
 @router.get("/uploads")
 async def list_uploads():

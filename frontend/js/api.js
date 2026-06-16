@@ -80,6 +80,10 @@ const API = {
     return r.json();
   },
 
+  async deleteRun(jobId) {
+    await fetch(`${API.BASE}/api/run/${jobId}`, { method: 'DELETE' });
+  },
+
   openLogSocket(jobId, onLine, onDone) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws/run/${jobId}/logs`);

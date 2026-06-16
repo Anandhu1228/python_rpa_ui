@@ -5,6 +5,7 @@ let currentJobId  = null;
 let currentWS     = null;
 let logBuffer     = [];
 let runStats      = { success: 0, failed: 0, total: 0 };
+let allRunsData   = [];
 
 // ── File handling ───────────────────────────────────────────
 
@@ -35,7 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
   }
 
-  // Check if there is an active job running to auto-attach
+  // Auto-attach if a live session is active
   const savedJobId = sessionStorage.getItem('currentJobId');
   if (savedJobId) {
      viewPastLog(savedJobId, "Restoring Session...");
@@ -55,7 +56,6 @@ async function parseAndPreviewFile(file) {
     let rows, headers;
 
     if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
-      // Read xlsx via SheetJS if available, else show note
       if (window.XLSX) {
         const ab = await file.arrayBuffer();
         const wb = XLSX.read(ab);
@@ -65,11 +65,9 @@ async function parseAndPreviewFile(file) {
         rows    = data.slice(1, 6);
       } else {
         table.innerHTML = '<div class="hint">Excel preview not available in browser (will work when running). Column list only.</div>';
-        // Read first line via text is not possible for xlsx — skip preview
         return;
       }
     } else {
-      // CSV — read as text
       const text = await file.text();
       const lines = text.split('\n').filter(l => l.trim());
       headers = parseCSVLine(lines[0] || '');
@@ -77,8 +75,6 @@ async function parseAndPreviewFile(file) {
     }
 
     count.textContent = `${rows.length}+ rows`;
-
-    // Build preview table (max 5 rows, max 8 cols)
     const displayHeaders = headers.slice(0, 8);
     const extra = headers.length > 8 ? ` (+${headers.length - 8} more)` : '';
     table.innerHTML = `
@@ -136,16 +132,23 @@ async function startRun() {
   try {
     const result = await API.startRun(formData);
     currentJobId = result.job_id;
-    sessionStorage.setItem('currentJobId', currentJobId); // SAVE FOR PERSISTENCE
+    sessionStorage.setItem('currentJobId', currentJobId);
 
     logBuffer = [];
     runStats  = { success: 0, failed: 0, total: 0 };
 
+    switchTab('logs');
+    document.getElementById('logs-recipe-grid').classList.add('hidden');
+    document.getElementById('logs-runs-list').classList.add('hidden');
+    document.getElementById('logs-terminal-container').classList.remove('hidden');
+    document.getElementById('btn-logs-back').classList.remove('hidden');
+    document.getElementById('logs-main-title').textContent = `Running Job`;
+    document.getElementById('logs-main-sub').textContent = 'Live output.';
     document.getElementById('log-terminal-title').textContent = `Live Logs: ${currentJobId}`;
-    clearLogs();
+    
+    _clearTerminalDiv();
     appendLog(`Job ${currentJobId} started`, 'log-head');
     appendLog('', '');
-    switchTab('logs');
     startLogStream(currentJobId);
 
   } catch (e) {
@@ -158,33 +161,114 @@ async function startRun() {
 // ── Run History & Log streaming ─────────────────────────────
 
 async function loadRunHistory() {
-  const container = document.getElementById('run-history-list');
+  const container = document.getElementById('logs-recipe-grid');
+  container.classList.remove('hidden');
+  document.getElementById('logs-runs-list').classList.add('hidden');
+  document.getElementById('logs-terminal-container').classList.add('hidden');
+  document.getElementById('btn-logs-back').classList.add('hidden');
+  document.getElementById('logs-main-title').textContent = 'Run History & Logs';
+  document.getElementById('logs-main-sub').textContent = 'Select a flow to view its past runs.';
+
   try {
-    const runs = await API.listRuns();
-    if (!runs.length) {
+    allRunsData = await API.listRuns();
+    if (!allRunsData.length) {
       container.innerHTML = '<div class="empty-state">No run history found.</div>';
       return;
     }
-    container.innerHTML = runs.map(r => `
-      <div class="recipe-card" style="cursor: pointer; padding: .85rem;" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">
-        <div class="row" style="justify-content: space-between;">
-           <div class="recipe-card-name" style="font-size: .85rem;">${esc(r.recipe_name)}</div>
-           <span class="badge ${r.status === 'done' ? 'badge-green' : (r.status === 'error' ? 'badge-red' : 'badge-blue')}">${r.status}</span>
-        </div>
-        <div class="recipe-card-url" style="margin-top: .25rem;">ID: ${r.job_id}</div>
-      </div>
-    `).join('');
+
+    const grouped = {};
+    allRunsData.forEach(r => {
+       if (!grouped[r.recipe_name]) grouped[r.recipe_name] = [];
+       grouped[r.recipe_name].push(r);
+    });
+
+    const html = [];
+    for (const [recipeName, runs] of Object.entries(grouped)) {
+        const latestRun = runs[0];
+        html.push(`
+          <div class="recipe-card" style="cursor: pointer; padding: .85rem;" onclick="showRunsForRecipe('${esc(recipeName)}')">
+            <div class="row" style="justify-content: space-between;">
+               <div class="recipe-card-name" style="font-size: .85rem;">${esc(recipeName)}</div>
+               <span class="badge badge-blue">${runs.length} Runs</span>
+            </div>
+            <div class="recipe-card-desc" style="margin-top: .25rem;">Latest: ${new Date(latestRun.created_at * 1000).toLocaleString()}</div>
+          </div>
+        `);
+    }
+    container.innerHTML = html.join('');
   } catch (e) {
     container.innerHTML = `<div class="empty-state">Error loading run history: ${e.message}</div>`;
   }
+}
+
+function showRunsForRecipe(recipeName) {
+  document.getElementById('logs-recipe-grid').classList.add('hidden');
+  const runsList = document.getElementById('logs-runs-list');
+  runsList.classList.remove('hidden');
+  document.getElementById('logs-terminal-container').classList.add('hidden');
+  document.getElementById('btn-logs-back').classList.remove('hidden');
+  document.getElementById('logs-main-title').textContent = `${recipeName}`;
+  document.getElementById('logs-main-sub').textContent = 'Select a run to view its logs.';
+
+  const runs = allRunsData.filter(r => r.recipe_name === recipeName);
+
+  runsList.innerHTML = runs.map(r => `
+    <div class="recipe-card" style="padding: .85rem; margin-bottom: .5rem; display: flex; justify-content: space-between; align-items: center;">
+      <div>
+         <div class="row gap-sm">
+           <span class="badge ${r.status === 'done' ? 'badge-green' : (r.status === 'error' ? 'badge-red' : 'badge-blue')}">${r.status}</span>
+           <span style="font-family: var(--mono); font-size: .8rem; color: var(--text2);">${r.job_id}</span>
+         </div>
+         <div style="font-size: .75rem; color: var(--text3); margin-top: .25rem;">${new Date(r.created_at * 1000).toLocaleString()}</div>
+      </div>
+      <div class="row gap-sm">
+         <button class="btn btn-sm btn-ghost" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">View Log</button>
+         <button class="btn btn-sm btn-ghost" onclick="downloadLogById('${r.job_id}')">Download</button>
+         <button class="btn btn-sm btn-danger" onclick="deletePastLog('${r.job_id}', '${esc(r.recipe_name)}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function backToLogRecipes() {
+  loadRunHistory();
+}
+
+async function deletePastLog(jobId, recipeName) {
+  if (!confirm(`Delete log for run ${jobId}?`)) return;
+  await API.deleteRun(jobId);
+  allRunsData = await API.listRuns();
+  const remaining = allRunsData.filter(r => r.recipe_name === recipeName);
+  if (remaining.length === 0) {
+      backToLogRecipes();
+  } else {
+      showRunsForRecipe(recipeName);
+  }
+  if (currentJobId === jobId) {
+      document.getElementById('logs-terminal-container').classList.add('hidden');
+  }
+}
+
+async function deleteCurrentLog() {
+  if (!currentJobId) return;
+  if (!confirm(`Delete log for run ${currentJobId}?`)) return;
+  await API.deleteRun(currentJobId);
+  document.getElementById('logs-terminal-container').classList.add('hidden');
+  backToLogRecipes();
 }
 
 async function viewPastLog(jobId, recipeName) {
   currentJobId = jobId;
   sessionStorage.setItem('currentJobId', currentJobId);
   document.getElementById('log-terminal-title').textContent = `Logs for: ${recipeName} (${jobId})`;
-  showProgressCard(false); // Default hide until we know status
-  clearLogs();
+  
+  document.getElementById('logs-recipe-grid').classList.add('hidden');
+  document.getElementById('logs-runs-list').classList.add('hidden');
+  document.getElementById('logs-terminal-container').classList.remove('hidden');
+  document.getElementById('btn-logs-back').classList.remove('hidden');
+
+  showProgressCard(false);
+  _clearTerminalDiv();
 
   try {
     const res = await API.getLogs(jobId);
@@ -192,11 +276,9 @@ async function viewPastLog(jobId, recipeName) {
       logBuffer = res.logs;
       logBuffer.forEach(line => appendLog(line, classifyLog(line)));
       
-      // If it is actively running, attach websocket
       if (res.status === 'running' || res.status === 'pending') {
          startLogStream(jobId);
       } else {
-         // It is completed. Don't add fake duplicate summaries, just show progress bar state
          if (res.summary) {
             showProgressCard(true);
             document.getElementById('progress-label').textContent = res.status === 'done' ? 'Run complete' : 'Run ended with error';
@@ -224,7 +306,6 @@ function startLogStream(jobId) {
   currentWS = API.openLogSocket(
     jobId,
     (line) => {
-      // Only append if it's new (avoids duplicating lines if we just fetched from history)
       if (!logBuffer.includes(line)) {
           logBuffer.push(line);
           appendLog(line, classifyLog(line));
@@ -274,7 +355,6 @@ function onRunDone(status, summary) {
     document.getElementById('progress-bar').style.background = 'var(--red)';
   }
 
-  // Safely update counters from summary without duplicating log lines
   if (summary) {
     document.getElementById('prog-success').textContent = `${summary.success || 0}`;
     document.getElementById('prog-failed').textContent = `${summary.failed || 0}`;
@@ -298,9 +378,8 @@ function appendLog(text, cls) {
   }
 }
 
-function clearLogs() {
+function _clearTerminalDiv() {
   document.getElementById('log-terminal').innerHTML = '';
-  logBuffer = [];
 }
 
 function downloadLogs() {
@@ -310,6 +389,20 @@ function downloadLogs() {
   a.href = URL.createObjectURL(blob);
   a.download = `rpa-log-${currentJobId || 'run'}.txt`;
   a.click();
+}
+
+async function downloadLogById(jobId) {
+  try {
+    const res = await API.getLogs(jobId);
+    const text = (res.logs || []).join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `rpa-log-${jobId}.txt`;
+    a.click();
+  } catch (e) {
+    alert("Failed to download: " + e.message);
+  }
 }
 
 function showProgressCard(show) {

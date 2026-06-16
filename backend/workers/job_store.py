@@ -49,7 +49,6 @@ class JobStore:
                     created_at=data.get("created_at", time.time())
                 )
                 
-                # Restore full logs to memory for instant UI loading
                 log_p = self._log_path(job_id)
                 if log_p.exists():
                     job.logs = log_p.read_text(encoding="utf-8").splitlines()
@@ -113,6 +112,17 @@ class JobStore:
                 job.summary = summary
                 self._save_meta(job)
 
+    def delete(self, job_id: str):
+        with self._lock:
+            if job_id in self._jobs:
+                del self._jobs[job_id]
+            meta_path = self._meta_path(job_id)
+            if meta_path.exists():
+                meta_path.unlink()
+            log_path = self._log_path(job_id)
+            if log_path.exists():
+                log_path.unlink()
+
     def all_jobs(self):
         with self._lock:
             jobs_list = [
@@ -125,7 +135,6 @@ class JobStore:
                 }
                 for j in self._jobs.values()
             ]
-            # Sort newest first
             jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
             return jobs_list
 
