@@ -15,7 +15,7 @@
   <nav class="sidebar-nav">
     <a href="#" class="nav-item active" data-tab="inspector">Inspector</a>
     <a href="#" class="nav-item" data-tab="flow">Flow Builder</a>
-    <a href="#" class="nav-item" data-tab="recipes">Recipes</a>
+    <a href="#" class="nav-item" data-tab="recipes">Flows</a>
     <a href="#" class="nav-item" data-tab="run">Run</a>
     <a href="#" class="nav-item" data-tab="logs">Logs</a>
     <a href="#" class="nav-item" data-tab="uploads">Uploads</a>
@@ -23,6 +23,7 @@
   <div class="sidebar-footer">
     <div>v1.0 · Playwright</div>
     <button id="theme-toggle" class="btn btn-sm btn-ghost" style="margin-top:.75rem; width: 100%;">Toggle Theme</button>
+    <button id="logout-btn" class="btn btn-sm btn-danger hidden" style="margin-top:.5rem; width: 100%;" onclick="API.logout()">Logout</button>
   </div>
 </aside>
 
@@ -154,7 +155,7 @@
 
   <section id="tab-recipes" class="tab">
     <div class="tab-header">
-      <h1>Recipes</h1>
+      <h1>Flows</h1>
       <p class="tab-sub">Saved automation configurations.</p>
     </div>
     <div id="recipes-list" class="recipe-grid">
@@ -169,7 +170,7 @@
     </div>
 
     <div class="card">
-      <div class="card-title">Select Recipe</div>
+      <div class="card-title">Select Flow</div>
       <select id="run-recipe-select" class="input">
         <option value="">— choose a recipe —</option>
       </select>
@@ -287,6 +288,18 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal()">Cancel</button>
       <button id="modal-save-btn" class="btn btn-primary" onclick="saveModal()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="auth-overlay" class="modal-overlay hidden" style="background: var(--bg); z-index: 1000; align-items: flex-start; padding-top: 10vh;">
+  <div class="modal-box" style="width: 400px; padding: 1rem;">
+    <div class="modal-header" style="border: none; padding-bottom: 0;">
+      <h2 id="auth-title" style="font-size: 1.25rem;">Login</h2>
+    </div>
+    <div id="auth-body" class="modal-body form-group" style="padding-top: 1rem;">
+    </div>
+    <div class="modal-footer" id="auth-footer" style="border: none;">
     </div>
   </div>
 </div>

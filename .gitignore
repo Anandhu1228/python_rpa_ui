@@ -220,3 +220,16 @@ drivers/
 # node_modules/
 # .next/
 # out/
+
+
+# Ignore storage data
+storage/uploads/*
+storage/recipes/*
+storage/logs/*
+storage/auth.db
+
+# Keep the empty directories themselves (optional but recommended)
+!storage/uploads/.gitkeep
+!storage/recipes/.gitkeep
+!storage/logs/.gitkeep
+
