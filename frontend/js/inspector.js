@@ -63,7 +63,7 @@ function renderLoginSteps() {
             <input class="input" placeholder='Field name (e.g. "identifier")'
               value="${esc(f.name)}"
               onchange="updateLoginField(${step._id},${fi},'name',this.value)">
-            <input class="input" type="password" placeholder="Value"
+            <input class="input" type="text" placeholder="Value"
               value="${esc(f.value)}"
               onchange="updateLoginField(${step._id},${fi},'value',this.value)">
             <button class="btn btn-sm btn-danger" onclick="removeLoginField(${step._id},${fi})">✕</button>

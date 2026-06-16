@@ -297,11 +297,13 @@ async function loadUploadsList() {
       <div class="recipe-card">
         <div class="recipe-card-name">${esc(f.filename)}</div>
         <div class="recipe-card-desc">Size: ${Math.round(f.size/1024)} KB</div>
+        <div class="recipe-card-desc">Flow: <strong>${esc(f.recipe_name)}</strong></div>
         <div class="row gap-sm" style="margin-top:.5rem">
           <span class="badge">Job: ${esc(f.job_id)}</span>
           <span class="badge badge-blue">Status: ${esc(f.job_status)}</span>
         </div>
         <div class="recipe-card-actions">
+          <button class="btn btn-sm btn-ghost" onclick="downloadDataFile('${f.filename}')">Download</button>
           <button class="btn btn-sm btn-danger" onclick="deleteUploadFile('${f.filename}')">Delete</button>
         </div>
       </div>
@@ -309,6 +311,10 @@ async function loadUploadsList() {
   } catch (e) {
     container.innerHTML = `<div class="empty-state">Error loading uploads: ${e.message}</div>`;
   }
+}
+
+function downloadDataFile(filename) {
+  window.open('/api/uploads/' + filename, '_blank');
 }
 
 async function deleteUploadFile(filename) {

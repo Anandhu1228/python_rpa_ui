@@ -18,10 +18,10 @@ async function loadRecipesList() {
           <span class="badge" style="font-family:var(--mono)">${r.recipe_id}</span>
         </div>
         <div class="recipe-card-actions">
-          <button class="btn btn-sm btn-primary" onclick="editRecipe('${r.recipe_id}')">✏ Edit</button>
-          <button class="btn btn-sm btn-green"   onclick="runRecipeQuick('${r.recipe_id}')">▶ Run</button>
+          <button class="btn btn-sm btn-primary" onclick="editRecipe('${r.recipe_id}')">Edit</button>
+          <button class="btn btn-sm btn-green"   onclick="runRecipeQuick('${r.recipe_id}')">Run</button>
           <button class="btn btn-sm btn-ghost"   onclick="downloadRecipe('${r.recipe_id}')">Download JSON</button>
-          <button class="btn btn-sm btn-danger"  onclick="deleteRecipe('${r.recipe_id}')">🗑</button>
+          <button class="btn btn-sm btn-danger"  onclick="deleteRecipe('${r.recipe_id}')">Delete</button>
         </div>
       </div>
     `).join('');

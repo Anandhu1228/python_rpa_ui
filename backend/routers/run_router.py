@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from backend.workers.job_store import job_store
@@ -44,7 +45,7 @@ async def start_run(
     upload_path.write_bytes(content)
 
     # Create job
-    job_store.create(job_id)
+    job_store.create(job_id, recipe.get("name", "Unknown Recipe"))
 
     # Run in background thread (Playwright is sync)
     def _run():
@@ -70,7 +71,8 @@ async def get_run(job_id: str):
         "job_id": job_id,
         "status": job.status,
         "summary": job.summary,
-        "log_count": len(job.logs),
+        "log_count": len(job_store.get_logs(job_id)),
+        "recipe_name": job.recipe_name
     }
 
 
@@ -99,11 +101,13 @@ async def list_uploads():
             job_id = f.stem
             job = job_store.get(job_id)
             job_status = job.status if job else "Unknown (archived)"
+            recipe_name = job.recipe_name if job else "Unknown Flow"
             files.append({
                 "filename": f.name,
                 "size": stat.st_size,
                 "job_id": job_id,
-                "job_status": job_status
+                "job_status": job_status,
+                "recipe_name": recipe_name
             })
     # Sort files by newest first
     files.sort(key=lambda x: (UPLOADS_DIR / x["filename"]).stat().st_mtime, reverse=True)
@@ -117,3 +121,11 @@ async def delete_upload(filename: str):
     if p.exists():
         p.unlink()
     return {"deleted": filename}
+
+
+@router.get("/uploads/{filename}")
+async def download_upload(filename: str):
+    p = UPLOADS_DIR / filename
+    if not p.exists():
+        raise HTTPException(404, "File not found")
+    return FileResponse(path=str(p), filename=filename)
