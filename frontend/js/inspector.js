@@ -136,12 +136,19 @@ function renderInspectResults(result, url) {
     if (f.type === 'hidden') continue;
     const typeClass = `t-${f.type}`;
     const selectorCss = f.name ? `input[name="${f.name}"]` : (f.id ? `#${f.id}` : '?');
+    
+    // UPDATED: Show radio/checkbox values in the placeholder column
+    let displayHint = esc(f.placeholder || '');
+    if (f.type === 'radio' || f.type === 'checkbox') {
+       displayHint = f.value ? `<span style="color:var(--text3)">val:</span> <b style="color:var(--text);font-family:var(--mono)">${esc(f.value)}</b>` : displayHint;
+    }
+
     rows.push(`
       <tr>
         <td><span class="type-tag ${typeClass}">${esc(f.type)}</span></td>
         <td><code>${esc(f.name || '')}</code></td>
         <td><code>${esc(f.id || '')}</code></td>
-        <td>${esc(f.placeholder || '')}</td>
+        <td>${displayHint}</td>
         <td><code>${esc(selectorCss)}</code></td>
         <td></td>
       </tr>
@@ -245,6 +252,7 @@ function useInspectInFlow() {
       csv_column: '',
       literal_value: '',
       label: f.placeholder || f.name || selector,
+      extracted_value: f.value || '', // UPDATED: Save for display
       value_map: [],
     });
   }
@@ -260,7 +268,7 @@ function useInspectInFlow() {
       csv_column: '',
       literal_value: '',
       label: s.name || selector,
-      options: s.options,
+      options: s.options, // UPDATED: Save for display
       value_map: [],
     });
   }
