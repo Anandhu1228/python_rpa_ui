@@ -1,9 +1,7 @@
 /* flow.js — Flow Builder tab */
 
-let flowSteps = [];           // array of step objects
-let editingRecipeId = null;   // when loading an existing recipe to edit
-
-// ── Step management ─────────────────────────────────────────
+let flowSteps = [];           
+let editingRecipeId = null;   
 
 function addFlowStep() {
   const id = 'step_' + Date.now();
@@ -18,7 +16,7 @@ function addFlowStep() {
     wait_for_selector: '',
     skip_if_no_data: false,
     _open: true,
-    inspection_steps: [], // NEW
+    inspection_steps: [], 
   });
   renderFlowSteps();
 }
@@ -45,8 +43,6 @@ function moveStep(id, dir) {
   [flowSteps[idx], flowSteps[newIdx]] = [flowSteps[newIdx], flowSteps[idx]];
   renderFlowSteps();
 }
-
-// ── In-Flow Inspection Pre-Steps Management ─────────────────
 
 function addInspectionStep(stepId) {
   const s = flowSteps.find(s => s._id === stepId);
@@ -112,8 +108,6 @@ function removeInspectionField(stepId, insStepId, fi) {
     }
 }
 
-// ── In-Flow Inspection ──────────────────────────────────────
-
 async function inspectStepInFlow(stepId) {
   const step = flowSteps.find(s => s._id === stepId);
   if (!step.url) { alert('Please enter a URL for this step first.'); return; }
@@ -124,11 +118,11 @@ async function inspectStepInFlow(stepId) {
   btn.disabled = true;
 
   try {
-    // Format the specific inspection steps for this flow step
+    // FIX 1: Auto-wrap the simple field name into a selector just like the main inspector does
     const inspectionPayload = (step.inspection_steps || []).map(is => ({
         url: is.url,
         fields: (is.fields || []).map(f => ({
-            selector: f.selector,
+            selector: `[name="${f.selector}"]`, 
             literal_value: f.literal_value
         })),
         submit_selector: is.submit_selector,
@@ -136,8 +130,6 @@ async function inspectStepInFlow(stepId) {
     }));
 
     const result = await API.inspect(step.url, inspectionPayload);
-    
-    // Convert inspection result to field mappings
     const mappings = [];
     
     for (const f of (result.inputs || [])) {
@@ -158,8 +150,22 @@ async function inspectStepInFlow(stepId) {
       if (!selector) continue;
       mappings.push({ _id: Date.now() + Math.random(), selector, field_type: 'textarea', source: 'csv_column', csv_column: '', literal_value: '', label: t.placeholder || t.name || selector, value_map: [] });
     }
+    
+    // FIX 2: Actually process the buttons the backend found and add them to mappings
+    for (const b of (result.buttons || [])) {
+      const selector = b.id ? `#${b.id}` : (b.type === 'submit' ? 'button[type="submit"]' : `button:has-text("${b.text}")`);
+      mappings.push({
+        _id: Date.now() + Math.random(),
+        selector,
+        field_type: 'click', 
+        source: 'literal',
+        csv_column: '',
+        literal_value: '',
+        label: b.text ? b.text.substring(0, 30) : selector,
+        value_map: []
+      });
+    }
 
-    // Append to step
     step.field_mappings.push(...mappings);
     renderFlowSteps();
     
@@ -169,8 +175,6 @@ async function inspectStepInFlow(stepId) {
     if(btn) { btn.innerHTML = oldText; btn.disabled = false; }
   }
 }
-
-// ── Mapping management ──────────────────────────────────────
 
 function addMapping(stepId) {
   const s = flowSteps.find(s => s._id === stepId);
@@ -199,11 +203,8 @@ function updateMapping(stepId, mid, key, val) {
   if (!s) return;
   const m = s.field_mappings.find(m => m._id === mid);
   if (m) m[key] = val;
-  // re-render only if source changes (to show/hide columns)
   if (key === 'source' || key === 'field_type') renderFlowSteps();
 }
-
-// ── Value Map management ────────────────────────────────────
 
 function addValueMap(stepId, mappingId) {
   const s = flowSteps.find(s => s._id === stepId);
@@ -232,8 +233,6 @@ function removeValueMap(stepId, mappingId, vmId) {
     renderFlowSteps();
   }
 }
-
-// ── Recipe login steps (in flow builder) ───────────────────
 
 let recipeLoginSteps = [];
 
@@ -330,8 +329,6 @@ function renderRecipeLoginSteps() {
   `).join('');
 }
 
-// ── Render flow steps ───────────────────────────────────────
-
 function renderFlowSteps() {
   const container = document.getElementById('flow-steps-list');
   if (!flowSteps.length) {
@@ -371,7 +368,6 @@ function renderFlowSteps() {
             </div>
           </div>
           
-          <!-- IN-FLOW INSPECTION SECTION -->
           <div style="grid-column:1/-1; background: var(--bg); padding: .75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: .5rem;">
               <div class="row" style="justify-content:space-between; margin-bottom:.5rem;">
                   <div style="font-size: .85rem; font-weight: 600; color: var(--accent);">🔍 Inspection Setup (Optional)</div>
@@ -399,7 +395,7 @@ function renderFlowSteps() {
                            <div style="margin-top:.5rem;">
                                ${(is.fields || []).map((f, fi) => `
                                     <div class="row gap-sm" style="margin-bottom: .3rem;">
-                                        <input class="input flex-1" placeholder="Selector" value="${esc(f.selector)}" onchange="updateInspectionField('${step._id}', ${is._id}, ${fi}, 'selector', this.value)">
+                                        <input class="input flex-1" placeholder='Field name (e.g. "identifier")' value="${esc(f.selector)}" onchange="updateInspectionField('${step._id}', ${is._id}, ${fi}, 'selector', this.value)">
                                         <input class="input flex-1" placeholder="Value (Literal)" value="${esc(f.literal_value)}" onchange="updateInspectionField('${step._id}', ${is._id}, ${fi}, 'literal_value', this.value)">
                                         <button class="btn btn-sm btn-danger" onclick="removeInspectionField('${step._id}', ${is._id}, ${fi})">✕</button>
                                     </div>
@@ -411,7 +407,6 @@ function renderFlowSteps() {
               </div>
               <button class="btn btn-sm btn-ghost" onclick="addInspectionStep('${step._id}')">+ Add Pre-Navigation Step</button>
           </div>
-          <!-- END IN-FLOW INSPECTION SECTION -->
 
           <div class="form-group">
             <label>Submit selector</label>
@@ -514,7 +509,6 @@ function renderMappingValue(stepId, m) {
       </div>
     `;
   }
-  // csv_column
   return `
     <div class="row gap-sm" style="min-width:0">
       <select class="input" style="width:90px;flex-shrink:0" onchange="updateMapping('${stepId}',${m._id},'source',this.value)">
@@ -527,8 +521,6 @@ function renderMappingValue(stepId, m) {
     </div>
   `;
 }
-
-// ── Save / Load / Clear ─────────────────────────────────────
 
 async function saveRecipe() {
   const name = document.getElementById('recipe-name').value.trim();
@@ -659,4 +651,13 @@ function clearFlow() {
   document.getElementById('recipe-base-url').value = '';
   renderFlowSteps();
   renderRecipeLoginSteps();
+}
+
+function esc(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
