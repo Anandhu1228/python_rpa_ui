@@ -84,9 +84,9 @@ const API = {
     await fetch(`${API.BASE}/api/run/${jobId}`, { method: 'DELETE' });
   },
 
-  openLogSocket(jobId, onLine, onDone) {
+  openLogSocket(jobId, startLine, onLine, onDone) {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${location.host}/ws/run/${jobId}/logs`);
+    const ws = new WebSocket(`${proto}://${location.host}/ws/run/${jobId}/logs?start=${startLine}`);
     ws.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === 'log')  onLine(msg.line);

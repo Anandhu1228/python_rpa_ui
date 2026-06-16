@@ -42,7 +42,7 @@ async def serve_index():
 
 
 @app.websocket("/ws/run/{job_id}/logs")
-async def run_logs_ws(websocket: WebSocket, job_id: str):
+async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0):
     await websocket.accept()
     job = job_store.get(job_id)
     if not job:
@@ -50,7 +50,7 @@ async def run_logs_ws(websocket: WebSocket, job_id: str):
         await websocket.close()
         return
 
-    sent = 0
+    sent = start
     try:
         while True:
             logs = job_store.get_logs(job_id)

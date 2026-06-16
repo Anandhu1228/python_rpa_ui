@@ -305,11 +305,10 @@ function startLogStream(jobId) {
 
   currentWS = API.openLogSocket(
     jobId,
+    logBuffer.length, // Let the backend know exactly how many lines we already have
     (line) => {
-      if (!logBuffer.includes(line)) {
-          logBuffer.push(line);
-          appendLog(line, classifyLog(line));
-      }
+      logBuffer.push(line);
+      appendLog(line, classifyLog(line));
       updateProgressFromLine(line);
     },
     (status, summary) => {
