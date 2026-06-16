@@ -65,6 +65,11 @@ const API = {
     return r.json();
   },
 
+  async listRuns() {
+    const r = await fetch(`${API.BASE}/api/run`);
+    return r.json();
+  },
+
   async getRunStatus(jobId) {
     const r = await fetch(`${API.BASE}/api/run/${jobId}`);
     return r.json();

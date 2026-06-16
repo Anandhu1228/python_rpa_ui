@@ -1,11 +1,12 @@
 """
 Disk-backed job store.
-Maps job_id → { status, logs, summary, recipe_name }
+Maps job_id → { status, logs, summary, recipe_name, created_at }
 Saves logs to storage/logs/<job_id>.log
 Saves meta to storage/logs/<job_id>_meta.json
 """
 import json
 import threading
+import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -19,6 +20,8 @@ class Job:
     recipe_name: str = "Unknown Recipe"
     status: str = "pending"          # pending | running | done | error
     summary: Optional[dict] = None
+    created_at: float = field(default_factory=time.time)
+    logs: List[str] = field(default_factory=list)  # Keep in memory for fast websocket reads
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 class JobStore:
@@ -38,12 +41,20 @@ class JobStore:
             try:
                 job_id = p.name.replace("_meta.json", "")
                 data = json.loads(p.read_text())
-                self._jobs[job_id] = Job(
+                job = Job(
                     job_id=job_id,
                     recipe_name=data.get("recipe_name", "Unknown Recipe"),
                     status=data.get("status", "unknown"),
-                    summary=data.get("summary")
+                    summary=data.get("summary"),
+                    created_at=data.get("created_at", time.time())
                 )
+                
+                # Restore full logs to memory for instant UI loading
+                log_p = self._log_path(job_id)
+                if log_p.exists():
+                    job.logs = log_p.read_text(encoding="utf-8").splitlines()
+                
+                self._jobs[job_id] = job
             except Exception:
                 pass
 
@@ -52,7 +63,8 @@ class JobStore:
             "job_id": job.job_id,
             "recipe_name": job.recipe_name,
             "status": job.status,
-            "summary": job.summary
+            "summary": job.summary,
+            "created_at": job.created_at
         }
         self._meta_path(job.job_id).write_text(json.dumps(data, indent=2))
 
@@ -61,7 +73,6 @@ class JobStore:
             job = Job(job_id=job_id, recipe_name=recipe_name)
             self._jobs[job_id] = job
             self._save_meta(job)
-            # Ensure log file exists and is empty
             self._log_path(job_id).write_text("")
             return job
 
@@ -69,10 +80,8 @@ class JobStore:
         return self._jobs.get(job_id)
 
     def get_logs(self, job_id: str) -> List[str]:
-        p = self._log_path(job_id)
-        if p.exists():
-            return p.read_text(encoding="utf-8").splitlines()
-        return []
+        job = self.get(job_id)
+        return job.logs[:] if job else []
 
     def get_status(self, job_id: str) -> str:
         job = self.get(job_id)
@@ -86,6 +95,7 @@ class JobStore:
         job = self.get(job_id)
         if job:
             with job._lock:
+                job.logs.append(line)
                 with self._log_path(job_id).open("a", encoding="utf-8") as f:
                     f.write(line + "\n")
 
@@ -105,9 +115,18 @@ class JobStore:
 
     def all_jobs(self):
         with self._lock:
-            return [
-                {"job_id": j.job_id, "status": j.status, "summary": j.summary, "recipe_name": j.recipe_name}
+            jobs_list = [
+                {
+                    "job_id": j.job_id, 
+                    "status": j.status, 
+                    "summary": j.summary, 
+                    "recipe_name": j.recipe_name,
+                    "created_at": j.created_at
+                }
                 for j in self._jobs.values()
             ]
+            # Sort newest first
+            jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
+            return jobs_list
 
 job_store = JobStore()

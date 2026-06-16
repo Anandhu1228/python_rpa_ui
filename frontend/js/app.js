@@ -14,6 +14,7 @@ function switchTab(name) {
   if (name === 'run')     populateRunRecipeSelect();
   if (name === 'flow')    renderRecipeLoginSteps();
   if (name === 'uploads') loadUploadsList();
+  if (name === 'logs')    loadRunHistory();
 }
 
 document.querySelectorAll('.nav-item').forEach(item => {

@@ -17,7 +17,7 @@ function onFileSelect(input) {
   parseAndPreviewFile(file);
 }
 
-// Drag-and-drop & Log persistence on load
+// Drag-and-drop
 document.addEventListener('DOMContentLoaded', async () => {
   const drop = document.getElementById('file-drop');
   if (drop) {
@@ -35,33 +35,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       });
   }
 
-  // Restore logs if page is refreshed
+  // Check if there is an active job running to auto-attach
   const savedJobId = sessionStorage.getItem('currentJobId');
   if (savedJobId) {
-    currentJobId = savedJobId;
-    try {
-      const res = await API.getLogs(currentJobId);
-      if (res && res.logs) {
-        logBuffer = res.logs;
-        clearLogs();
-        logBuffer.forEach(line => appendLog(line, classifyLog(line)));
-        
-        if (res.status === 'running' || res.status === 'pending') {
-          startLogStream(currentJobId);
-        } else {
-          showProgressCard(true);
-          // Recalculate stats from buffer
-          runStats = { success: 0, failed: 0, total: res.summary ? (res.summary.success + res.summary.failed) : 0 };
-          logBuffer.forEach(line => {
-              if (line.includes('✅') || (line.includes('Row') && line.includes('done'))) runStats.success++;
-              if (line.includes('❌') || (line.includes('Row') && line.includes('failed'))) runStats.failed++;
-          });
-          onRunDone(res.status, res.summary);
-        }
-      }
-    } catch (e) {
-      console.warn("Could not restore logs:", e);
-    }
+     viewPastLog(savedJobId, "Restoring Session...");
   }
 });
 
@@ -164,6 +141,7 @@ async function startRun() {
     logBuffer = [];
     runStats  = { success: 0, failed: 0, total: 0 };
 
+    document.getElementById('log-terminal-title').textContent = `Live Logs: ${currentJobId}`;
     clearLogs();
     appendLog(`Job ${currentJobId} started`, 'log-head');
     appendLog('', '');
@@ -177,7 +155,65 @@ async function startRun() {
   }
 }
 
-// ── Log streaming ───────────────────────────────────────────
+// ── Run History & Log streaming ─────────────────────────────
+
+async function loadRunHistory() {
+  const container = document.getElementById('run-history-list');
+  try {
+    const runs = await API.listRuns();
+    if (!runs.length) {
+      container.innerHTML = '<div class="empty-state">No run history found.</div>';
+      return;
+    }
+    container.innerHTML = runs.map(r => `
+      <div class="recipe-card" style="cursor: pointer; padding: .85rem;" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">
+        <div class="row" style="justify-content: space-between;">
+           <div class="recipe-card-name" style="font-size: .85rem;">${esc(r.recipe_name)}</div>
+           <span class="badge ${r.status === 'done' ? 'badge-green' : (r.status === 'error' ? 'badge-red' : 'badge-blue')}">${r.status}</span>
+        </div>
+        <div class="recipe-card-url" style="margin-top: .25rem;">ID: ${r.job_id}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state">Error loading run history: ${e.message}</div>`;
+  }
+}
+
+async function viewPastLog(jobId, recipeName) {
+  currentJobId = jobId;
+  sessionStorage.setItem('currentJobId', currentJobId);
+  document.getElementById('log-terminal-title').textContent = `Logs for: ${recipeName} (${jobId})`;
+  showProgressCard(false); // Default hide until we know status
+  clearLogs();
+
+  try {
+    const res = await API.getLogs(jobId);
+    if (res && res.logs) {
+      logBuffer = res.logs;
+      logBuffer.forEach(line => appendLog(line, classifyLog(line)));
+      
+      // If it is actively running, attach websocket
+      if (res.status === 'running' || res.status === 'pending') {
+         startLogStream(jobId);
+      } else {
+         // It is completed. Don't add fake duplicate summaries, just show progress bar state
+         if (res.summary) {
+            showProgressCard(true);
+            document.getElementById('progress-label').textContent = res.status === 'done' ? 'Run complete' : 'Run ended with error';
+            document.getElementById('progress-bar').style.width = '100%';
+            document.getElementById('progress-bar').style.background = res.status === 'done' ? 'var(--green)' : 'var(--red)';
+            document.getElementById('progress-pct').textContent = '100%';
+            document.getElementById('prog-success').textContent = `${res.summary.success}`;
+            document.getElementById('prog-failed').textContent = `${res.summary.failed}`;
+         }
+      }
+    } else {
+      appendLog('No logs recorded for this run.', 'log-info');
+    }
+  } catch (e) {
+    appendLog(`Error fetching logs: ${e.message}`, 'log-err');
+  }
+}
 
 function startLogStream(jobId) {
   if (currentWS) currentWS.close();
@@ -188,8 +224,11 @@ function startLogStream(jobId) {
   currentWS = API.openLogSocket(
     jobId,
     (line) => {
-      logBuffer.push(line);
-      appendLog(line, classifyLog(line));
+      // Only append if it's new (avoids duplicating lines if we just fetched from history)
+      if (!logBuffer.includes(line)) {
+          logBuffer.push(line);
+          appendLog(line, classifyLog(line));
+      }
       updateProgressFromLine(line);
     },
     (status, summary) => {
@@ -230,21 +269,15 @@ function onRunDone(status, summary) {
     document.getElementById('progress-bar').style.width = '100%';
     document.getElementById('progress-bar').style.background = 'var(--green)';
     document.getElementById('progress-pct').textContent = '100%';
-    appendLog('', '');
-    appendLog('Run completed.', 'log-ok');
   } else {
     label.textContent = 'Run ended with error';
     document.getElementById('progress-bar').style.background = 'var(--red)';
-    appendLog('Run ended with error.', 'log-err');
   }
 
+  // Safely update counters from summary without duplicating log lines
   if (summary) {
-    if (summary.success !== undefined) {
-      appendLog(`   Success: ${summary.success}  |  Failed: ${summary.failed}`, 'log-head');
-    }
-    if (summary.failed_ids && summary.failed_ids.length) {
-      appendLog(`   Failed IDs: ${summary.failed_ids.join(', ')}`, 'log-err');
-    }
+    document.getElementById('prog-success').textContent = `${summary.success || 0}`;
+    document.getElementById('prog-failed').textContent = `${summary.failed || 0}`;
   }
 
   document.getElementById('btn-run').disabled = false;
