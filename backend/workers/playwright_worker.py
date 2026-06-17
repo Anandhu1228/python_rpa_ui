@@ -364,6 +364,7 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                     "Chrome/120.0.0.0 Safari/537.36"
                 ),
                 viewport={"width": 1280, "height": 800},
+                record_video_dir=str(Path(__file__).parent.parent.parent / "storage" / "logs") # <-- ADD THIS LINE
             )
             page = context.new_page()
             stealth_sync(page)
