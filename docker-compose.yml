@@ -9,10 +9,8 @@ services:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
     volumes:
-      # Persist recipes and uploads across restarts
-      - ./storage/recipes:/app/storage/recipes
-      - ./storage/uploads:/app/storage/uploads
-      - ./storage/logs:/app/storage/logs
+      # Persist ALL storage data (recipes, uploads, logs, AND auth.db) across restarts
+      - ./storage:/app/storage
       # Hot-reload frontend without rebuild (dev convenience)
       - ./frontend:/app/frontend:ro
     restart: unless-stopped
