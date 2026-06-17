@@ -328,7 +328,6 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
 def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_row: Optional[int] = None):
     """Called in a background thread."""
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-    from playwright_stealth import stealth_sync
     
     RECORDINGS_DIR = Path(__file__).parent.parent.parent / "storage" / "recordings"
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -358,18 +357,12 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
 
         log(job_id, "🚀 Launching browser...")
         with sync_playwright() as p:
-            # We add this specific flag to bypass Cloudflare/Akamai Headless detection
-            browser = p.chromium.launch(
-                headless=True,
-                args=["--disable-blink-features=AutomationControlled"]
-            )
+            browser = p.chromium.launch(headless=True)
             context = browser.new_context(
                 viewport={"width": 1280, "height": 800},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                 record_video_dir=str(RECORDINGS_DIR)
             )
             page = context.new_page()
-            stealth_sync(page)
 
             # Execute login steps once
             login_steps = recipe.get("login_steps") or []
