@@ -22,6 +22,8 @@ class Job:
     summary: Optional[dict] = None
     created_at: float = field(default_factory=time.time)
     logs: List[str] = field(default_factory=list)  # Keep in memory for fast websocket reads
+    pending_action: Optional[dict] = None
+    action_response: Optional[str] = None
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 class JobStore:
@@ -137,5 +139,33 @@ class JobStore:
             ]
             jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
             return jobs_list
+
+    def set_pending_action(self, job_id: str, action: dict):
+        job = self.get(job_id)
+        if job:
+            with job._lock:
+                job.pending_action = action
+                job.action_response = None
+
+    def get_pending_action(self, job_id: str) -> Optional[dict]:
+        job = self.get(job_id)
+        return job.pending_action if job else None
+
+    def set_action_response(self, job_id: str, response: str):
+        job = self.get(job_id)
+        if job:
+            with job._lock:
+                job.action_response = response
+
+    def get_action_response(self, job_id: str) -> Optional[str]:
+        job = self.get(job_id)
+        return job.action_response if job else None
+
+    def clear_action(self, job_id: str):
+        job = self.get(job_id)
+        if job:
+            with job._lock:
+                job.pending_action = None
+                job.action_response = None
 
 job_store = JobStore()

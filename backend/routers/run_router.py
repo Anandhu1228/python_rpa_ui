@@ -23,6 +23,10 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 RECIPES_DIR = Path(__file__).parent.parent.parent / "storage" / "recipes"
 
 
+class ActionReq(BaseModel):
+    response: str
+
+
 @router.post("/run")
 async def start_run(
     background_tasks: BackgroundTasks,
@@ -55,6 +59,12 @@ async def start_run(
     t.start()
 
     return {"job_id": job_id, "status": "running"}
+
+
+@router.post("/run/{job_id}/action")
+async def submit_action(job_id: str, req: ActionReq):
+    job_store.set_action_response(job_id, req.response)
+    return {"success": True}
 
 
 @router.get("/run")

@@ -26,6 +26,10 @@ class FlowStep(BaseModel):
     # NEW: Steps to execute just for the inspector to reach this page
     inspection_steps: Optional[List[Dict[str, Any]]] = None
     
+    # NEW: CAPTCHA / Human Handoff
+    captcha_image_selector: Optional[str] = None
+    captcha_input_selector: Optional[str] = None
+
     submit_selector: Optional[str] = None
     wait_for_url: Optional[str] = None      # URL substring to wait for after submit
     wait_for_selector: Optional[str] = None

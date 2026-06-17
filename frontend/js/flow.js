@@ -19,6 +19,9 @@ function addFlowStep() {
     skip_if_no_data: false,
     _open: true,
     inspection_steps: [], 
+    requires_captcha: false,
+    captcha_image_selector: '',
+    captcha_input_selector: ''
   });
   renderFlowSteps();
 }
@@ -36,6 +39,7 @@ function toggleStep(id) {
 function updateStep(id, key, val) {
   const s = flowSteps.find(s => s._id === id);
   if (s) s[key] = val;
+  if (key === 'requires_captcha') renderFlowSteps();
 }
 
 function moveStep(id, dir) {
@@ -423,6 +427,25 @@ function renderFlowSteps() {
               <button class="btn btn-sm btn-ghost" onclick="addInspectionStep('${step._id}')">+ Add Pre-Navigation Step</button>
           </div>
 
+          <div class="form-group" style="grid-column:1/-1; background: var(--bg2); padding: .75rem; border: 1px solid var(--border2); border-radius: var(--radius-sm); margin-top: .5rem;">
+            <label class="toggle-label" style="font-weight: 600; color: var(--text);">
+              <input type="checkbox" ${step.requires_captcha ? 'checked' : ''} onchange="updateStep('${step._id}','requires_captcha',this.checked)">
+              Requires Human Handoff (e.g. CAPTCHA)
+            </label>
+            <div id="captcha-fields-${step._id}" class="${step.requires_captcha ? '' : 'hidden'}" style="margin-top: .75rem;">
+              <div class="form-grid">
+                <div class="form-group">
+                  <label>Image/Canvas Selector</label>
+                  <input class="input" placeholder="e.g. canvas.captcha-canvas" value="${esc(step.captcha_image_selector||'')}" onchange="updateStep('${step._id}','captcha_image_selector',this.value)">
+                </div>
+                <div class="form-group">
+                  <label>Input Field Selector</label>
+                  <input class="input" placeholder="e.g. input#captcha" value="${esc(step.captcha_input_selector||'')}" onchange="updateStep('${step._id}','captcha_input_selector',this.value)">
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div class="form-group">
             <label>Submit selector</label>
             <input class="input" value="${esc(step.submit_selector)}"
@@ -596,6 +619,8 @@ function buildRecipePayload() {
        submit_selector: is.submit_selector,
        wait_for_url: is.wait_for_url
     })),
+    captcha_image_selector: s.requires_captcha ? s.captcha_image_selector : '',
+    captcha_input_selector: s.requires_captcha ? s.captcha_input_selector : '',
     field_mappings: (s.field_mappings || []).map(m => ({
       selector: m.selector,
       field_type: m.field_type,
@@ -655,6 +680,9 @@ function loadRecipeIntoFlow(recipe) {
     ...s,
     _id: s.step_id || ('step_' + Date.now() + si),
     _open: false,
+    requires_captcha: !!(s.captcha_image_selector && s.captcha_input_selector),
+    captcha_image_selector: s.captcha_image_selector || '',
+    captcha_input_selector: s.captcha_input_selector || '',
     inspection_steps: (s.inspection_steps || []).map(is => ({
       ...is,
       _id: Date.now() + Math.random(),

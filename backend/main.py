@@ -69,6 +69,7 @@ async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0, token: 
         return
 
     sent = start
+    last_action = None
     try:
         while True:
             logs = job_store.get_logs(job_id)
@@ -82,6 +83,11 @@ async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0, token: 
                 summary = job_store.get_summary(job_id)
                 await websocket.send_json({"type": "done", "status": status, "summary": summary})
                 break
+
+            action = job_store.get_pending_action(job_id)
+            if action != last_action:
+                await websocket.send_json({"type": "action", "action": action})
+                last_action = action
 
             await asyncio.sleep(0.15)
     except WebSocketDisconnect:

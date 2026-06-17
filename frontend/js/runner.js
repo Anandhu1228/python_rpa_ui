@@ -158,6 +158,42 @@ async function startRun() {
   }
 }
 
+// ── Human Action / Chat Handoff ─────────────────────────────
+
+function handleRunAction(action) {
+  const actionCard = document.getElementById('interactive-action-card');
+  if (!action) {
+    actionCard.classList.add('hidden');
+    return;
+  }
+  if (action.type === 'captcha') {
+    actionCard.classList.remove('hidden');
+    document.getElementById('action-content').innerHTML = `
+      <div style="color: var(--text2); font-size: .85rem; margin-bottom: .5rem;">Please read the characters below and enter them:</div>
+      <img src="data:image/png;base64,${action.image_b64}" style="max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff;">
+    `;
+    const inp = document.getElementById('action-input');
+    inp.value = '';
+    inp.focus();
+    
+    // Auto-scroll so the user sees the chat window
+    const terminal = document.getElementById('log-terminal');
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+}
+
+async function submitRunAction() {
+  const val = document.getElementById('action-input').value.trim();
+  if (!val) return;
+  try {
+    await API.submitRunAction(currentJobId, val);
+    document.getElementById('interactive-action-card').classList.add('hidden');
+    appendLog('Sent response to bot.', 'log-info');
+  } catch (e) {
+    alert('Failed to send answer: ' + e.message);
+  }
+}
+
 // ── Run History & Log streaming ─────────────────────────────
 
 async function loadRunHistory() {
@@ -302,10 +338,11 @@ function startLogStream(jobId) {
 
   showProgressCard(true);
   document.getElementById('progress-label').textContent = 'Running…';
+  document.getElementById('interactive-action-card').classList.add('hidden');
 
   currentWS = API.openLogSocket(
     jobId,
-    logBuffer.length, // Let the backend know exactly how many lines we already have
+    logBuffer.length,
     (line) => {
       logBuffer.push(line);
       appendLog(line, classifyLog(line));
@@ -313,6 +350,9 @@ function startLogStream(jobId) {
     },
     (status, summary) => {
       onRunDone(status, summary);
+    },
+    (action) => {
+      handleRunAction(action);
     }
   );
 }
@@ -320,7 +360,7 @@ function startLogStream(jobId) {
 function classifyLog(line) {
   if (line.includes('✅') || line.includes('✓'))  return 'log-ok';
   if (line.includes('❌') || line.includes('✗') || line.includes('💥')) return 'log-err';
-  if (line.includes('⚠'))  return 'log-warn';
+  if (line.includes('⚠') || line.includes('⚠️'))  return 'log-warn';
   if (line.match(/^[=─]+$/)) return 'log-sep';
   if (line.includes('📊') || line.includes('🚀') || line.includes('📂')) return 'log-head';
   if (line.includes('→'))   return 'log-info';
@@ -344,6 +384,7 @@ function updateProgressFromLine(line) {
 
 function onRunDone(status, summary) {
   const label = document.getElementById('progress-label');
+  document.getElementById('interactive-action-card').classList.add('hidden');
   if (status === 'done') {
     label.textContent = 'Run complete';
     document.getElementById('progress-bar').style.width = '100%';

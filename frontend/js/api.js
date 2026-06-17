@@ -111,6 +111,16 @@ const API = {
     return r.json();
   },
 
+  async submitRunAction(jobId, response) {
+    const r = await this._fetch(`/api/run/${jobId}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response })
+    });
+    if (!r.ok) throw new Error('Failed to send action');
+    return r.json();
+  },
+
   async listRuns() {
     const r = await this._fetch(`/api/run`);
     return r.json();
@@ -130,7 +140,7 @@ const API = {
     await this._fetch(`/api/run/${jobId}`, { method: 'DELETE' });
   },
 
-  openLogSocket(jobId, startLine, onLine, onDone) {
+  openLogSocket(jobId, startLine, onLine, onDone, onAction) {
     const token = localStorage.getItem('rpa_token') || '';
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws/run/${jobId}/logs?start=${startLine}&token=${token}`);
@@ -139,6 +149,7 @@ const API = {
       if (msg.type === 'log')  onLine(msg.line);
       if (msg.type === 'done') onDone(msg.status, msg.summary);
       if (msg.type === 'error') onDone('error', { error: msg.msg });
+      if (msg.type === 'action') onAction(msg.action);
     };
     ws.onerror = () => onDone('error', { error: 'WebSocket error' });
     return ws;

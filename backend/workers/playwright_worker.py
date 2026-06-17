@@ -238,6 +238,48 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         except FieldError as e:
             log(job_id, f"    ⚠ {e}")
 
+    # Human Handoff / CAPTCHA processing
+    cap_img_sel = step.get("captcha_image_selector", "")
+    cap_inp_sel = step.get("captcha_input_selector", "")
+    if cap_img_sel and cap_inp_sel:
+        log(job_id, f"    → [Human Handoff] Waiting for image/canvas '{cap_img_sel}'...")
+        try:
+            import base64
+            el = page.locator(cap_img_sel).first
+            el.wait_for(state="visible", timeout=action_to)
+            img_bytes = el.screenshot(timeout=action_to)
+            b64 = base64.b64encode(img_bytes).decode('utf-8')
+
+            log(job_id, "    → [Human Handoff] Action required: Waiting for user to solve CAPTCHA via Chat...")
+            job_store.set_pending_action(job_id, {"type": "captcha", "image_b64": b64})
+
+            # Wait up to 5 minutes for human input
+            waited = 0
+            resp = None
+            while waited < 300:
+                resp = job_store.get_action_response(job_id)
+                if resp:
+                    break
+                time.sleep(1)
+                waited += 1
+
+            job_store.clear_action(job_id)
+
+            if not resp:
+                log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
+                return False
+
+            log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
+            inp = page.locator(cap_inp_sel).first
+            inp.wait_for(state="visible", timeout=action_to)
+            inp.fill(resp, timeout=action_to)
+            human_delay(delay.get("between_fields_ms", 100))
+
+        except Exception as e:
+            log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
+            job_store.clear_action(job_id)
+            return False
+
     # Submit
     submit_sel = step.get("submit_selector", "")
     if submit_sel:
