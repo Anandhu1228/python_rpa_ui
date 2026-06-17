@@ -358,9 +358,14 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
 
         log(job_id, "🚀 Launching browser...")
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            # We add this specific flag to bypass Cloudflare/Akamai Headless detection
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"]
+            )
             context = browser.new_context(
                 viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                 record_video_dir=str(RECORDINGS_DIR)
             )
             page = context.new_page()
