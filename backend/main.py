@@ -12,6 +12,7 @@ from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconn
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.websockets import WebSocketState
 
 from backend.routers import inspect_router, recipe_router, run_router
 from backend.workers.job_store import job_store
@@ -62,6 +63,30 @@ async def serve_index():
     return FileResponse(str(BASE / "frontend" / "index.html"))
 
 
+async def _safe_send(websocket: WebSocket, payload: dict) -> bool:
+    """Send JSON only if the socket is still connected. Returns False if the
+    client is already gone (e.g. the tab was refreshed/closed), so the caller
+    can stop instead of trying to keep using a dead connection."""
+    if websocket.client_state != WebSocketState.CONNECTED:
+        return False
+    try:
+        await websocket.send_json(payload)
+        return True
+    except Exception:
+        return False
+
+
+async def _safe_close(websocket: WebSocket):
+    """Close the socket only if it's still open. Avoids
+    'Cannot call "send" once a close message has been sent' when the
+    client already disconnected on its own (e.g. page refresh)."""
+    if websocket.client_state == WebSocketState.CONNECTED:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
 @app.websocket("/ws/run/{job_id}/logs")
 async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0, token: str = ""):
     if not is_valid_session(token):
@@ -71,8 +96,8 @@ async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0, token: 
     await websocket.accept()
     job = job_store.get(job_id)
     if not job:
-        await websocket.send_json({"type": "error", "msg": "Job not found"})
-        await websocket.close()
+        await _safe_send(websocket, {"type": "error", "msg": "Job not found"})
+        await _safe_close(websocket)
         return
 
     sent = start
@@ -82,22 +107,24 @@ async def run_logs_ws(websocket: WebSocket, job_id: str, start: int = 0, token: 
             logs = job_store.get_logs(job_id)
             if len(logs) > sent:
                 for line in logs[sent:]:
-                    await websocket.send_json({"type": "log", "line": line})
+                    if not await _safe_send(websocket, {"type": "log", "line": line}):
+                        return  # client is gone — stop this orphaned loop
                 sent = len(logs)
 
             status = job_store.get_status(job_id)
             if status in ("done", "error"):
                 summary = job_store.get_summary(job_id)
-                await websocket.send_json({"type": "done", "status": status, "summary": summary})
+                await _safe_send(websocket, {"type": "done", "status": status, "summary": summary})
                 break
 
             action = job_store.get_pending_action(job_id)
             if action != last_action:
-                await websocket.send_json({"type": "action", "action": action})
+                if not await _safe_send(websocket, {"type": "action", "action": action}):
+                    return  # client is gone — stop this orphaned loop
                 last_action = action
 
             await asyncio.sleep(0.15)
     except WebSocketDisconnect:
         pass
     finally:
-        await websocket.close()
+        await _safe_close(websocket)

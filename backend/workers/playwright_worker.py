@@ -144,10 +144,10 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict):
             should_check = value.lower() in ("yes", "true", "1", "on", "checked")
             if should_check:
                 if not el.is_checked():
-                    el.check(timeout=action_to)
+                    el.check(timeout=action_to, force=True)
             else:
                 if el.is_checked():
-                    el.uncheck(timeout=action_to)
+                    el.uncheck(timeout=action_to, force=True)
 
         elif field_type == "click":
             # Just click an element (button/link) — value not used
