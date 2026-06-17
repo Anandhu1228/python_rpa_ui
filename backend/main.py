@@ -33,11 +33,18 @@ async def auth_middleware(request: Request, call_next):
     path = request.url.path
     if path.startswith("/api/") and not path.startswith("/api/auth"):
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        token = None
+        
+        # 1. Try to get token from secure Authorization header (used by JS fetch)
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        # 2. Fallback to URL query parameter (used by <video src="...">)
+        elif "token" in request.query_params:
+            token = request.query_params.get("token")
+            
+        if not token or not is_valid_session(token):
             return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
-        token = auth_header.split(" ")[1]
-        if not is_valid_session(token):
-            return JSONResponse(status_code=401, content={"detail": "Session expired"})
+            
     return await call_next(request)
 
 # Mount routers
