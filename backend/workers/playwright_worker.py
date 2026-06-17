@@ -286,6 +286,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
 def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_row: Optional[int] = None):
     """Called in a background thread."""
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    from playwright_stealth import stealth_sync
 
     job_store.set_status(job_id, "running")
     delay = recipe.get("delay", {})
@@ -323,6 +324,7 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 viewport={"width": 1280, "height": 800},
             )
             page = context.new_page()
+            stealth_sync(page)
 
             # Execute login steps once
             login_steps = recipe.get("login_steps") or []
@@ -398,4 +400,3 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
         log(job_id, traceback.format_exc())
         job_store.set_status(job_id, "error")
         job_store.set_summary(job_id, {"error": str(e)})
-        
