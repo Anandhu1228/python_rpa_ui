@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-DB_PATH = Path(__file__).parent.parent.parent / "storage" / "auth.db"
+DB_PATH = Path(__file__).parent.parent / "storage" / "auth.db"
 
 router = APIRouter()
 
