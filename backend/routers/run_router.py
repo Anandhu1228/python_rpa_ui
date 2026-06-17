@@ -21,7 +21,8 @@ router = APIRouter()
 UPLOADS_DIR = Path(__file__).parent.parent.parent / "storage" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 RECIPES_DIR = Path(__file__).parent.parent.parent / "storage" / "recipes"
-
+RECORDINGS_DIR = Path(__file__).parent.parent.parent / "storage" / "recordings"
+RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 class ActionReq(BaseModel):
     response: str
@@ -100,9 +101,21 @@ async def get_logs(job_id: str, since: int = 0):
         "summary": job.summary,
     }
 
+
+@router.get("/run/{job_id}/video")
+async def get_video(job_id: str):
+    vid_path = RECORDINGS_DIR / f"{job_id}.webm"
+    if not vid_path.exists():
+        raise HTTPException(404, "Recording not found")
+    return FileResponse(path=str(vid_path), media_type="video/webm")
+
+
 @router.delete("/run/{job_id}")
 async def delete_run(job_id: str):
     job_store.delete(job_id)
+    vid_path = RECORDINGS_DIR / f"{job_id}.webm"
+    if vid_path.exists():
+        vid_path.unlink()
     return {"deleted": job_id}
 
 

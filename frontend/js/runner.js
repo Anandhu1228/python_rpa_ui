@@ -258,6 +258,7 @@ function showRunsForRecipe(recipeName) {
          <div style="font-size: .75rem; color: var(--text3); margin-top: .25rem;">${new Date(r.created_at * 1000).toLocaleString()}</div>
       </div>
       <div class="row gap-sm">
+         <button class="btn btn-sm btn-primary" onclick="playVideo('${r.job_id}')">▶ Play</button>
          <button class="btn btn-sm btn-ghost" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">View Log</button>
          <button class="btn btn-sm btn-ghost" onclick="downloadLogById('${r.job_id}')">Download</button>
          <button class="btn btn-sm btn-danger" onclick="deletePastLog('${r.job_id}', '${esc(r.recipe_name)}')">Delete</button>
@@ -266,12 +267,28 @@ function showRunsForRecipe(recipeName) {
   `).join('');
 }
 
+function playVideo(jobId) {
+    document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
+    const player = document.getElementById('run-video-player');
+    const token = localStorage.getItem('rpa_token') || '';
+    player.src = `/api/run/${jobId}/video?token=${token}`;
+    document.getElementById('video-overlay').classList.remove('hidden');
+    player.play().catch(e => console.warn('Autoplay prevented', e));
+}
+
+function closeVideoModal() {
+    document.getElementById('video-overlay').classList.add('hidden');
+    const player = document.getElementById('run-video-player');
+    player.pause();
+    player.src = '';
+}
+
 function backToLogRecipes() {
   loadRunHistory();
 }
 
 async function deletePastLog(jobId, recipeName) {
-  if (!confirm(`Delete log for run ${jobId}?`)) return;
+  if (!confirm(`Delete log and recording for run ${jobId}?`)) return;
   await API.deleteRun(jobId);
   allRunsData = await API.listRuns();
   const remaining = allRunsData.filter(r => r.recipe_name === recipeName);
@@ -287,7 +304,7 @@ async function deletePastLog(jobId, recipeName) {
 
 async function deleteCurrentLog() {
   if (!currentJobId) return;
-  if (!confirm(`Delete log for run ${currentJobId}?`)) return;
+  if (!confirm(`Delete log and recording for run ${currentJobId}?`)) return;
   await API.deleteRun(currentJobId);
   document.getElementById('logs-terminal-container').classList.add('hidden');
   backToLogRecipes();
