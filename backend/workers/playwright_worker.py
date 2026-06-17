@@ -360,12 +360,6 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
-                # Simulate a real browser to avoid bot detection
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
                 viewport={"width": 1280, "height": 800},
                 record_video_dir=str(RECORDINGS_DIR)
             )
