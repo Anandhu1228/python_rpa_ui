@@ -525,7 +525,10 @@ function _buildUserEventNode(ev) {
     case 'click': {
       wrap.style.marginLeft = '1.5rem';
       const ctx = ev.context === 'new tab' ? ' (new tab)' : '';
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🖱 Clicked <code>${esc(ev.selector)}</code>${ctx}</div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action" style="flex-direction: column; gap: .2rem; align-items: flex-start;">
+        <div>🖱 <strong>Clicked</strong></div>
+        <div style="font-size: .75rem; opacity: .8; word-break: break-all;"><code>${esc(ev.selector)}</code>${ctx}</div>
+      </div>`;
       break;
     }
 
