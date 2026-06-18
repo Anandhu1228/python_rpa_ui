@@ -103,11 +103,28 @@ async def get_logs(job_id: str, since: int = 0):
 
 
 @router.get("/run/{job_id}/video")
-async def get_video(job_id: str):
-    vid_path = RECORDINGS_DIR / f"{job_id}.webm"
+async def get_video(job_id: str, tab: int = 1):
+    """Get recording. tab=1 for main tab, tab=2,3... for new tabs opened during run."""
+    if tab <= 1:
+        vid_path = RECORDINGS_DIR / f"{job_id}.webm"
+    else:
+        vid_path = RECORDINGS_DIR / f"{job_id}_tab{tab}.webm"
     if not vid_path.exists():
         raise HTTPException(404, "Recording not found")
     return FileResponse(path=str(vid_path), media_type="video/webm")
+
+@router.get("/run/{job_id}/videos")
+async def list_videos(job_id: str):
+    """List all available recording tabs for a job."""
+    available = []
+    main = RECORDINGS_DIR / f"{job_id}.webm"
+    if main.exists():
+        available.append({"tab": 1, "label": "Main Tab", "url": f"/api/run/{job_id}/video?tab=1"})
+    for tab_num in range(2, 10):
+        p = RECORDINGS_DIR / f"{job_id}_tab{tab_num}.webm"
+        if p.exists():
+            available.append({"tab": tab_num, "label": f"Tab {tab_num}", "url": f"/api/run/{job_id}/video?tab={tab_num}"})
+    return available
 
 
 @router.delete("/run/{job_id}")

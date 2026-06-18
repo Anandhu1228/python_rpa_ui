@@ -483,14 +483,17 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 # Delay between records
                 human_delay(delay.get("between_records_ms", 800))
 
-            # Save and rename the video recording safely before closing
-            try:
-                page.close()
-                if page.video:
-                    page.video.save_as(str(RECORDINGS_DIR / f"{job_id}.webm"))
-                    page.video.delete()
-            except Exception as e:
-                log(job_id, f"  ⚠ Could not process video file: {e}")
+            # Save videos for all pages (original tab + any new tabs opened)
+            all_pages = context.pages
+            for tab_idx, p in enumerate(all_pages):
+                try:
+                    suffix = f"{job_id}.webm" if tab_idx == 0 else f"{job_id}_tab{tab_idx + 1}.webm"
+                    p.close()
+                    if p.video:
+                        p.video.save_as(str(RECORDINGS_DIR / suffix))
+                        p.video.delete()
+                except Exception as e:
+                    log(job_id, f"  ⚠ Could not process video for tab {tab_idx + 1}: {e}")
 
             context.close()
             browser.close()

@@ -277,11 +277,33 @@ function showRunsForRecipe(recipeName) {
   `).join('');
 }
 
-function playVideo(jobId) {
-    document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
-    const player = document.getElementById('run-video-player');
+async function playVideo(jobId, tab) {
     const token = localStorage.getItem('rpa_token') || '';
-    player.src = `/api/run/${jobId}/video?token=${token}`;
+    // If tab not specified, check how many tabs are available
+    if (!tab) {
+        try {
+            const videos = await API._fetch(`/api/run/${jobId}/videos`).then(r => r.json());
+            if (videos.length > 1) {
+                // Show tab selector in modal title
+                const tabs = videos.map(v =>
+                    `<button class="btn btn-sm btn-ghost" onclick="playVideo('',${v.tab})" style="margin-right:.3rem">${v.label}</button>`
+                ).join('');
+                document.getElementById('video-modal-title').innerHTML =
+                    `Recording: ${jobId} &nbsp; ${tabs}`;
+                tab = 1;
+            } else {
+                document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
+                tab = 1;
+            }
+        } catch(e) {
+            document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
+            tab = 1;
+        }
+    } else {
+        // Keep existing tab buttons in title, just update active marker
+    }
+    const player = document.getElementById('run-video-player');
+    player.src = `/api/run/${jobId}/video?tab=${tab}&token=${token}`;
     document.getElementById('video-overlay').classList.remove('hidden');
     player.play().catch(e => console.warn('Autoplay prevented', e));
 }
