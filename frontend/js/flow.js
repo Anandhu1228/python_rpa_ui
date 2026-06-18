@@ -818,6 +818,25 @@ function clearFlow() {
   renderRecipeLoginSteps();
 }
 
+function importRecipeFromJSON(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const recipe = JSON.parse(e.target.result);
+      loadRecipeIntoFlow(recipe);
+      editingRecipeId = null; // imported JSON is treated as a new flow, not an overwrite
+      const st = document.getElementById('save-status');
+      if (st) st.textContent = 'JSON imported — click "Save Recipe" to add it as a new flow.';
+    } catch (err) {
+      alert('Invalid JSON file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  input.value = '';
+}
+
 function esc(str) {
   if (!str) return '';
   return String(str)

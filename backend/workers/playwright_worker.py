@@ -427,7 +427,17 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 viewport={"width": 1280, "height": 800},
                 record_video_dir=str(RECORDINGS_DIR)
             )
+            # Track every page ever opened in this context (main + any popups/new tabs),
+            # since a page that gets closed mid-run (e.g. by the site itself, like a
+            # verification widget) would otherwise disappear from context.pages before
+            # we get a chance to save its video.
+            recorded_pages = []
+            def _track_page(new_p):
+                if new_p not in recorded_pages:
+                    recorded_pages.append(new_p)
+            context.on("page", _track_page)
             page = context.new_page()
+            _track_page(page)
 
             # Execute login steps once
             login_steps = recipe.get("login_steps") or []
@@ -483,12 +493,14 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 # Delay between records
                 human_delay(delay.get("between_records_ms", 800))
 
-            # Save videos for all pages (original tab + any new tabs opened)
-            all_pages = context.pages
+            # Save videos for all pages (original tab + any new tabs opened),
+            # including ones already closed during the run.
+            all_pages = recorded_pages
             for tab_idx, p in enumerate(all_pages):
                 try:
                     suffix = f"{job_id}.webm" if tab_idx == 0 else f"{job_id}_tab{tab_idx + 1}.webm"
-                    p.close()
+                    if not p.is_closed():
+                        p.close()
                     if p.video:
                         p.video.save_as(str(RECORDINGS_DIR / suffix))
                         p.video.delete()

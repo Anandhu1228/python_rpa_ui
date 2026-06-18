@@ -286,7 +286,7 @@ async function playVideo(jobId, tab) {
             if (videos.length > 1) {
                 // Show tab selector in modal title
                 const tabs = videos.map(v =>
-                    `<button class="btn btn-sm btn-ghost" onclick="playVideo('',${v.tab})" style="margin-right:.3rem">${v.label}</button>`
+                    `<button class="btn btn-sm btn-ghost" onclick="playVideo('${jobId}',${v.tab})" style="margin-right:.3rem">${v.label}</button>`
                 ).join('');
                 document.getElementById('video-modal-title').innerHTML =
                     `Recording: ${jobId} &nbsp; ${tabs}`;
