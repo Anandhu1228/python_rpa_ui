@@ -495,12 +495,11 @@ function appendUserEvent(ev) {
 function _buildUserEventNode(ev) {
   const wrap = document.createElement('div');
   wrap.className = 'uf-entry';
-  wrap.style.marginBottom = '0.75rem';
+  wrap.style.marginBottom = '0.5rem';
 
   switch (ev._t) {
 
     case 'start': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-system">▶ Started processing <strong>${ev.total}</strong> record${ev.total !== 1 ? 's' : ''} (rows ${ev.start}–${ev.end})</div>`;
       break;
     }
@@ -511,38 +510,33 @@ function _buildUserEventNode(ev) {
     }
 
     case 'navigate': {
-      wrap.style.marginLeft = '1.5rem';
       let cleanUrl = ev.url || '';
       if (cleanUrl.length > 75 && cleanUrl.includes('?')) {
         cleanUrl = cleanUrl.split('?')[0] + '?...';
       }
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(cleanUrl)}</span></div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action" style="margin-left: 1.5rem;">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(cleanUrl)}</span></div>`;
       break;
     }
 
     case 'click': {
-      wrap.style.marginLeft = '1.5rem';
       const ctx = ev.context === 'new tab' ? ' (new tab)' : '';
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🖱 Clicked <code>${esc(ev.selector)}</code>${ctx}</div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action" style="margin-left: 1.5rem;">🖱 Clicked <code>${esc(ev.selector)}</code>${ctx}</div>`;
       break;
     }
 
     case 'new_tab': {
-      wrap.style.marginLeft = '1.5rem';
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🗖 Switched to new tab</div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action" style="margin-left: 1.5rem;">🗖 Switched to new tab</div>`;
       break;
     }
 
     case 'reached': {
-      wrap.style.marginLeft = '1.5rem';
-      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ <strong>${esc(ev.label)}</strong> completed</div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-ok" style="margin-left: 1.5rem;">✓ <strong>${esc(ev.label)}</strong> completed</div>`;
       break;
     }
 
     case 'ask': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
-        <div class="uf-bubble uf-question">
+        <div class="uf-bubble uf-question" style="margin-left: 1.5rem;">
           <span class="uf-q-icon">❓</span>
           <span>${esc(ev.question)}</span>
         </div>`;
@@ -550,9 +544,8 @@ function _buildUserEventNode(ev) {
     }
 
     case 'answer': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
-        <div class="uf-answer-row">
+        <div class="uf-answer-row" style="margin-left: 1.5rem;">
           <div class="uf-bubble uf-question" style="opacity:.6;font-size:.8rem;">${esc(ev.question)}</div>
           <div class="uf-bubble uf-reply">✍ Entered: <strong>${esc(ev.answer)}</strong></div>
         </div>`;
@@ -560,9 +553,8 @@ function _buildUserEventNode(ev) {
     }
 
     case 'captcha': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
-        <div class="uf-bubble uf-captcha">
+        <div class="uf-bubble uf-captcha" style="margin-left: 1.5rem;">
           <div class="uf-captcha-label">🔒 CAPTCHA — please solve:</div>
           <img src="data:image/png;base64,${ev.image_b64}" class="uf-captcha-img">
         </div>`;
@@ -570,31 +562,27 @@ function _buildUserEventNode(ev) {
     }
 
     case 'captcha_answer': {
-      wrap.style.marginLeft = '1.5rem';
-      wrap.innerHTML = `<div class="uf-bubble uf-reply">✍ CAPTCHA answer entered: <strong>${esc(ev.answer)}</strong></div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-reply" style="margin-left: 1.5rem;">✍ CAPTCHA answer entered: <strong>${esc(ev.answer)}</strong></div>`;
       break;
     }
 
     case 'captcha_timeout': {
-      wrap.style.marginLeft = '1.5rem';
-      wrap.innerHTML = `<div class="uf-bubble uf-err">⏱ CAPTCHA timed out — no response received</div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-err" style="margin-left: 1.5rem;">⏱ CAPTCHA timed out — no response received</div>`;
       break;
     }
 
     case 'row_done': {
-      wrap.style.marginLeft = '1.5rem';
       if (ev.success) {
         wrap.innerHTML = `<div class="uf-bubble uf-ok uf-row-result">✅ Row completed successfully</div>`;
       } else {
         wrap.innerHTML = `<div class="uf-bubble uf-err uf-row-result">❌ Row failed</div>`;
       }
-      // Add spacing after each row result
+      // Space between entries if multiple in CSV
       wrap.style.marginBottom = '2.5rem';
       break;
     }
 
     case 'summary': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
         <div class="uf-bubble uf-system uf-summary">
           <div style="font-weight:700;margin-bottom:.4rem;">📊 Run Complete</div>
@@ -605,7 +593,6 @@ function _buildUserEventNode(ev) {
     }
 
     case 'info': {
-      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-system">${esc(ev.msg)}</div>`;
       break;
     }
