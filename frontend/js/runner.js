@@ -1,11 +1,13 @@
 /* runner.js — Run tab + Logs tab */
 
-let selectedFile = null;
+let selectedFile  = null;
 let currentJobId  = null;
 let currentWS     = null;
-let logBuffer     = [];
+let logBuffer     = [];      // raw lines (dev view source of truth)
+let userEvents    = [];      // structured {_t, ...} events (user view source of truth)
 let runStats      = { success: 0, failed: 0, total: 0 };
 let allRunsData   = [];
+let logViewMode   = 'user';  // 'user' | 'dev'  — current active pane
 
 // ── File handling ───────────────────────────────────────────
 
@@ -18,28 +20,26 @@ function onFileSelect(input) {
   parseAndPreviewFile(file);
 }
 
-// Drag-and-drop
 document.addEventListener('DOMContentLoaded', async () => {
   const drop = document.getElementById('file-drop');
   if (drop) {
-      drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.background = 'var(--accent-dim)'; });
-      drop.addEventListener('dragleave', () => { drop.style.background = ''; });
-      drop.addEventListener('drop', e => {
-        e.preventDefault();
-        drop.style.background = '';
-        const file = e.dataTransfer.files[0];
-        if (file) {
-          selectedFile = file;
-          document.getElementById('file-drop-name').textContent = file.name;
-          parseAndPreviewFile(file);
-        }
-      });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.style.background = 'var(--accent-dim)'; });
+    drop.addEventListener('dragleave', () => { drop.style.background = ''; });
+    drop.addEventListener('drop', e => {
+      e.preventDefault();
+      drop.style.background = '';
+      const file = e.dataTransfer.files[0];
+      if (file) {
+        selectedFile = file;
+        document.getElementById('file-drop-name').textContent = file.name;
+        parseAndPreviewFile(file);
+      }
+    });
   }
 
-  // Auto-attach if a live session is active
   const savedJobId = sessionStorage.getItem('currentJobId');
   if (savedJobId) {
-     viewPastLog(savedJobId, "Restoring Session...");
+    viewPastLog(savedJobId, "Restoring Session...");
   }
 });
 
@@ -87,9 +87,7 @@ async function parseAndPreviewFile(file) {
         </tbody>
       </table>
     `;
-
     chips.innerHTML = headers.map(h => `<span class="col-chip">${esc(h)}</span>`).join('');
-
   } catch (e) {
     table.innerHTML = `<div class="hint" style="color:var(--red)">Parse error: ${e.message}</div>`;
   }
@@ -134,8 +132,9 @@ async function startRun() {
     currentJobId = result.job_id;
     sessionStorage.setItem('currentJobId', currentJobId);
 
-    logBuffer = [];
-    runStats  = { success: 0, failed: 0, total: 0 };
+    logBuffer  = [];
+    userEvents = [];
+    runStats   = { success: 0, failed: 0, total: 0 };
 
     switchTab('logs');
     document.getElementById('logs-recipe-grid').classList.add('hidden');
@@ -145,10 +144,11 @@ async function startRun() {
     document.getElementById('logs-main-title').textContent = `Running Job`;
     document.getElementById('logs-main-sub').textContent = 'Live output.';
     document.getElementById('log-terminal-title').textContent = `Live Logs: ${currentJobId}`;
-    
+
     _clearTerminalDiv();
-    appendLog(`Job ${currentJobId} started`, 'log-head');
-    appendLog('', '');
+    _clearUserFeed();
+    appendDevLog(`Job ${currentJobId} started`, 'log-head');
+    appendUserEvent({ _t: 'info', msg: `Job ${currentJobId} started` });
     startLogStream(currentJobId);
 
   } catch (e) {
@@ -198,9 +198,33 @@ async function submitRunAction() {
   try {
     await API.submitRunAction(currentJobId, val);
     document.getElementById('interactive-action-card').classList.add('hidden');
-    appendLog('Sent response to bot.', 'log-info');
+    appendDevLog('Sent response to bot.', 'log-info');
   } catch (e) {
     alert('Failed to send answer: ' + e.message);
+  }
+}
+
+// ── Log view toggle ─────────────────────────────────────────
+
+function setLogView(mode) {
+  logViewMode = mode;
+  const btnUser = document.getElementById('log-toggle-user');
+  const btnDev  = document.getElementById('log-toggle-dev');
+  const devPane  = document.getElementById('log-terminal');
+  const userPane = document.getElementById('log-user-feed');
+
+  if (mode === 'user') {
+    btnUser.classList.add('active-toggle');
+    btnDev.classList.remove('active-toggle');
+    userPane.classList.remove('hidden');
+    devPane.classList.add('hidden');
+    userPane.scrollTop = userPane.scrollHeight;
+  } else {
+    btnDev.classList.add('active-toggle');
+    btnUser.classList.remove('active-toggle');
+    devPane.classList.remove('hidden');
+    userPane.classList.add('hidden');
+    devPane.scrollTop = devPane.scrollHeight;
   }
 }
 
@@ -224,22 +248,22 @@ async function loadRunHistory() {
 
     const grouped = {};
     allRunsData.forEach(r => {
-       if (!grouped[r.recipe_name]) grouped[r.recipe_name] = [];
-       grouped[r.recipe_name].push(r);
+      if (!grouped[r.recipe_name]) grouped[r.recipe_name] = [];
+      grouped[r.recipe_name].push(r);
     });
 
     const html = [];
     for (const [recipeName, runs] of Object.entries(grouped)) {
-        const latestRun = runs[0];
-        html.push(`
-          <div class="recipe-card" style="cursor: pointer; padding: .85rem;" onclick="showRunsForRecipe('${esc(recipeName)}')">
-            <div class="row" style="justify-content: space-between;">
-               <div class="recipe-card-name" style="font-size: .85rem;">${esc(recipeName)}</div>
-               <span class="badge badge-blue">${runs.length} Runs</span>
-            </div>
-            <div class="recipe-card-desc" style="margin-top: .25rem;">Latest: ${new Date(latestRun.created_at * 1000).toLocaleString()}</div>
+      const latestRun = runs[0];
+      html.push(`
+        <div class="recipe-card" style="cursor: pointer; padding: .85rem;" onclick="showRunsForRecipe('${esc(recipeName)}')">
+          <div class="row" style="justify-content: space-between;">
+            <div class="recipe-card-name" style="font-size: .85rem;">${esc(recipeName)}</div>
+            <span class="badge badge-blue">${runs.length} Runs</span>
           </div>
-        `);
+          <div class="recipe-card-desc" style="margin-top: .25rem;">Latest: ${new Date(latestRun.created_at * 1000).toLocaleString()}</div>
+        </div>
+      `);
     }
     container.innerHTML = html.join('');
   } catch (e) {
@@ -261,62 +285,20 @@ function showRunsForRecipe(recipeName) {
   runsList.innerHTML = runs.map(r => `
     <div class="recipe-card" style="padding: .85rem; margin-bottom: .5rem; display: flex; justify-content: space-between; align-items: center;">
       <div>
-         <div class="row gap-sm">
-           <span class="badge ${r.status === 'done' ? 'badge-green' : (r.status === 'error' ? 'badge-red' : 'badge-blue')}">${r.status}</span>
-           <span style="font-family: var(--mono); font-size: .8rem; color: var(--text2);">${r.job_id}</span>
-         </div>
-         <div style="font-size: .75rem; color: var(--text3); margin-top: .25rem;">${new Date(r.created_at * 1000).toLocaleString()}</div>
+        <div class="row gap-sm">
+          <span class="badge ${r.status === 'done' ? 'badge-green' : (r.status === 'error' ? 'badge-red' : 'badge-blue')}">${r.status}</span>
+          <span style="font-family: var(--mono); font-size: .8rem; color: var(--text2);">${r.job_id}</span>
+        </div>
+        <div style="font-size: .75rem; color: var(--text3); margin-top: .25rem;">${new Date(r.created_at * 1000).toLocaleString()}</div>
       </div>
       <div class="row gap-sm">
-         <button class="btn btn-sm btn-primary" onclick="playVideo('${r.job_id}')">▶ Play</button>
-         <button class="btn btn-sm btn-ghost" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">View Log</button>
-         <button class="btn btn-sm btn-ghost" onclick="downloadLogById('${r.job_id}')">Download</button>
-         <button class="btn btn-sm btn-danger" onclick="deletePastLog('${r.job_id}', '${esc(r.recipe_name)}')">Delete</button>
+        <button class="btn btn-sm btn-primary" onclick="playVideo('${r.job_id}')">▶ Play</button>
+        <button class="btn btn-sm btn-ghost" onclick="viewPastLog('${r.job_id}', '${esc(r.recipe_name)}')">View Log</button>
+        <button class="btn btn-sm btn-ghost" onclick="downloadLogById('${r.job_id}')">Download</button>
+        <button class="btn btn-sm btn-danger" onclick="deletePastLog('${r.job_id}', '${esc(r.recipe_name)}')">Delete</button>
       </div>
     </div>
   `).join('');
-}
-
-async function playVideo(jobId, tab) {
-    const token = localStorage.getItem('rpa_token') || '';
-    // If tab not specified, check how many tabs are available
-    if (!tab) {
-        try {
-            const videos = await API._fetch(`/api/run/${jobId}/videos`).then(r => r.json());
-            if (videos.length > 1) {
-                // Show tab selector in modal title
-                const tabs = videos.map(v =>
-                    `<button class="btn btn-sm btn-ghost" onclick="playVideo('${jobId}',${v.tab})" style="margin-right:.3rem">${v.label}</button>`
-                ).join('');
-                document.getElementById('video-modal-title').innerHTML =
-                    `Recording: ${jobId} &nbsp; ${tabs}`;
-                tab = 1;
-            } else {
-                document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
-                tab = 1;
-            }
-        } catch(e) {
-            document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
-            tab = 1;
-        }
-    } else {
-        // Keep existing tab buttons in title, just update active marker
-    }
-    const player = document.getElementById('run-video-player');
-    player.src = `/api/run/${jobId}/video?tab=${tab}&token=${token}`;
-    document.getElementById('video-overlay').classList.remove('hidden');
-    player.play().catch(e => console.warn('Autoplay prevented', e));
-}
-
-function closeVideoModal() {
-    document.getElementById('video-overlay').classList.add('hidden');
-    const player = document.getElementById('run-video-player');
-    player.pause();
-    player.src = '';
-}
-
-function backToLogRecipes() {
-  loadRunHistory();
 }
 
 async function deletePastLog(jobId, recipeName) {
@@ -325,12 +307,12 @@ async function deletePastLog(jobId, recipeName) {
   allRunsData = await API.listRuns();
   const remaining = allRunsData.filter(r => r.recipe_name === recipeName);
   if (remaining.length === 0) {
-      backToLogRecipes();
+    backToLogRecipes();
   } else {
-      showRunsForRecipe(recipeName);
+    showRunsForRecipe(recipeName);
   }
   if (currentJobId === jobId) {
-      document.getElementById('logs-terminal-container').classList.add('hidden');
+    document.getElementById('logs-terminal-container').classList.add('hidden');
   }
 }
 
@@ -346,7 +328,7 @@ async function viewPastLog(jobId, recipeName) {
   currentJobId = jobId;
   sessionStorage.setItem('currentJobId', currentJobId);
   document.getElementById('log-terminal-title').textContent = `Logs for: ${recipeName} (${jobId})`;
-  
+
   document.getElementById('logs-recipe-grid').classList.add('hidden');
   document.getElementById('logs-runs-list').classList.add('hidden');
   document.getElementById('logs-terminal-container').classList.remove('hidden');
@@ -354,31 +336,42 @@ async function viewPastLog(jobId, recipeName) {
 
   showProgressCard(false);
   _clearTerminalDiv();
+  _clearUserFeed();
+  logBuffer  = [];
+  userEvents = [];
 
   try {
     const res = await API.getLogs(jobId);
     if (res && res.logs) {
       logBuffer = res.logs;
-      logBuffer.forEach(line => appendLog(line, classifyLog(line)));
-      
+      logBuffer.forEach(line => {
+        const ev = _tryParseEvent(line);
+        if (ev) {
+          userEvents.push(ev);
+          appendUserEvent(ev);
+        } else {
+          appendDevLog(line, classifyLog(line));
+        }
+      });
+
       if (res.status === 'running' || res.status === 'pending') {
-         startLogStream(jobId);
+        startLogStream(jobId);
       } else {
-         if (res.summary) {
-            showProgressCard(true);
-            document.getElementById('progress-label').textContent = res.status === 'done' ? 'Run complete' : 'Run ended with error';
-            document.getElementById('progress-bar').style.width = '100%';
-            document.getElementById('progress-bar').style.background = res.status === 'done' ? 'var(--green)' : 'var(--red)';
-            document.getElementById('progress-pct').textContent = '100%';
-            document.getElementById('prog-success').textContent = `${res.summary.success}`;
-            document.getElementById('prog-failed').textContent = `${res.summary.failed}`;
-         }
+        if (res.summary) {
+          showProgressCard(true);
+          document.getElementById('progress-label').textContent = res.status === 'done' ? 'Run complete' : 'Run ended with error';
+          document.getElementById('progress-bar').style.width = '100%';
+          document.getElementById('progress-bar').style.background = res.status === 'done' ? 'var(--green)' : 'var(--red)';
+          document.getElementById('progress-pct').textContent = '100%';
+          document.getElementById('prog-success').textContent = `${res.summary.success || 0}`;
+          document.getElementById('prog-failed').textContent = `${res.summary.failed || 0}`;
+        }
       }
     } else {
-      appendLog('No logs recorded for this run.', 'log-info');
+      appendDevLog('No logs recorded for this run.', 'log-info');
     }
   } catch (e) {
-    appendLog(`Error fetching logs: ${e.message}`, 'log-err');
+    appendDevLog(`Error fetching logs: ${e.message}`, 'log-err');
   }
 }
 
@@ -394,8 +387,14 @@ function startLogStream(jobId) {
     logBuffer.length,
     (line) => {
       logBuffer.push(line);
-      appendLog(line, classifyLog(line));
-      updateProgressFromLine(line);
+      const ev = _tryParseEvent(line);
+      if (ev) {
+        userEvents.push(ev);
+        appendUserEvent(ev);
+      } else {
+        appendDevLog(line, classifyLog(line));
+        updateProgressFromLine(line);
+      }
     },
     (status, summary) => {
       onRunDone(status, summary);
@@ -404,6 +403,17 @@ function startLogStream(jobId) {
       handleRunAction(action);
     }
   );
+}
+
+// ── Log parsing ─────────────────────────────────────────────
+
+function _tryParseEvent(line) {
+  if (!line || line[0] !== '{') return null;
+  try {
+    const obj = JSON.parse(line);
+    if (obj && obj._t) return obj;
+  } catch (e) {}
+  return null;
 }
 
 function classifyLog(line) {
@@ -453,16 +463,16 @@ function onRunDone(status, summary) {
   document.getElementById('btn-run').textContent = 'Start Run';
 }
 
-// ── Log terminal UI ─────────────────────────────────────────
+// ── Dev terminal (raw log) ──────────────────────────────────
 
-function appendLog(text, cls) {
+function appendDevLog(text, cls) {
   const terminal = document.getElementById('log-terminal');
   const span = document.createElement('span');
   span.className = 'log-line ' + (cls || '');
   span.textContent = text;
   terminal.appendChild(span);
   terminal.appendChild(document.createTextNode('\n'));
-  if (document.getElementById('autoscroll-toggle').checked) {
+  if (document.getElementById('autoscroll-toggle').checked && logViewMode === 'dev') {
     terminal.scrollTop = terminal.scrollHeight;
   }
 }
@@ -470,6 +480,131 @@ function appendLog(text, cls) {
 function _clearTerminalDiv() {
   document.getElementById('log-terminal').innerHTML = '';
 }
+
+// ── User feed (chat-style) ──────────────────────────────────
+
+function _clearUserFeed() {
+  document.getElementById('log-user-feed').innerHTML = '';
+}
+
+function appendUserEvent(ev) {
+  const feed = document.getElementById('log-user-feed');
+  const node = _buildUserEventNode(ev);
+  if (!node) return;
+  feed.appendChild(node);
+  if (document.getElementById('autoscroll-toggle').checked && logViewMode === 'user') {
+    feed.scrollTop = feed.scrollHeight;
+  }
+}
+
+function _buildUserEventNode(ev) {
+  const wrap = document.createElement('div');
+  wrap.className = 'uf-entry';
+
+  switch (ev._t) {
+
+    case 'start': {
+      wrap.innerHTML = `<div class="uf-bubble uf-system">▶ Started processing <strong>${ev.total}</strong> record${ev.total !== 1 ? 's' : ''} (rows ${ev.start}–${ev.end})</div>`;
+      break;
+    }
+
+    case 'row_start': {
+      wrap.innerHTML = `<div class="uf-row-header">Row ${ev.row_num} / ${ev.row_total} &mdash; <span class="uf-row-id">${esc(String(ev.row_id))}</span></div>`;
+      break;
+    }
+
+    case 'navigate': {
+      wrap.innerHTML = `<div class="uf-bubble uf-action">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(ev.url)}</span></div>`;
+      break;
+    }
+
+    case 'click': {
+      const ctx = ev.context === 'new tab' ? ' (new tab)' : '';
+      wrap.innerHTML = `<div class="uf-bubble uf-action">🖱 Clicked <code>${esc(ev.selector)}</code>${ctx}</div>`;
+      break;
+    }
+
+    case 'new_tab': {
+      wrap.innerHTML = `<div class="uf-bubble uf-action">🗖 Switched to new tab &mdash; <span class="uf-url">${esc(ev.url)}</span></div>`;
+      break;
+    }
+
+    case 'reached': {
+      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ <strong>${esc(ev.label)}</strong> completed &mdash; now at <span class="uf-url">${esc(ev.url)}</span></div>`;
+      break;
+    }
+
+    case 'ask': {
+      wrap.innerHTML = `
+        <div class="uf-bubble uf-question">
+          <span class="uf-q-icon">❓</span>
+          <span>${esc(ev.question)}</span>
+        </div>`;
+      break;
+    }
+
+    case 'answer': {
+      wrap.innerHTML = `
+        <div class="uf-answer-row">
+          <div class="uf-bubble uf-question" style="opacity:.6;font-size:.8rem;">${esc(ev.question)}</div>
+          <div class="uf-bubble uf-reply">✍ Entered: <strong>${esc(ev.answer)}</strong></div>
+        </div>`;
+      break;
+    }
+
+    case 'captcha': {
+      wrap.innerHTML = `
+        <div class="uf-bubble uf-captcha">
+          <div class="uf-captcha-label">🔒 CAPTCHA — please solve:</div>
+          <img src="data:image/png;base64,${ev.image_b64}" class="uf-captcha-img">
+        </div>`;
+      break;
+    }
+
+    case 'captcha_answer': {
+      wrap.innerHTML = `<div class="uf-bubble uf-reply">✍ CAPTCHA answer entered: <strong>${esc(ev.answer)}</strong></div>`;
+      break;
+    }
+
+    case 'captcha_timeout': {
+      wrap.innerHTML = `<div class="uf-bubble uf-err">⏱ CAPTCHA timed out — no response received</div>`;
+      break;
+    }
+
+    case 'row_done': {
+      if (ev.success) {
+        wrap.innerHTML = `<div class="uf-bubble uf-ok uf-row-result">✅ Row completed successfully</div>`;
+      } else {
+        wrap.innerHTML = `<div class="uf-bubble uf-err uf-row-result">❌ Row failed</div>`;
+      }
+      // Add spacing after each row result
+      wrap.style.marginBottom = '1.25rem';
+      break;
+    }
+
+    case 'summary': {
+      wrap.innerHTML = `
+        <div class="uf-bubble uf-system uf-summary">
+          <div style="font-weight:700;margin-bottom:.4rem;">📊 Run Complete</div>
+          <div>✅ Success: <strong>${ev.success}</strong> &nbsp; ❌ Failed: <strong>${ev.failed}</strong></div>
+          ${ev.failed_ids && ev.failed_ids.length ? `<div style="margin-top:.3rem;font-size:.8rem;color:var(--text2)">Failed: ${ev.failed_ids.map(x => esc(String(x))).join(', ')}</div>` : ''}
+        </div>`;
+      break;
+    }
+
+    case 'info': {
+      wrap.innerHTML = `<div class="uf-bubble uf-system">${esc(ev.msg)}</div>`;
+      break;
+    }
+
+    default:
+      return null;
+  }
+
+  return wrap;
+}
+
+// ── Log terminal UI ─────────────────────────────────────────
 
 function downloadLogs() {
   const text = logBuffer.join('\n');
@@ -496,6 +631,46 @@ async function downloadLogById(jobId) {
 
 function showProgressCard(show) {
   document.getElementById('run-progress-card').classList.toggle('hidden', !show);
+}
+
+// ── Video playback ──────────────────────────────────────────
+
+async function playVideo(jobId, tab) {
+  const token = localStorage.getItem('rpa_token') || '';
+  if (!tab) {
+    try {
+      const videos = await API._fetch(`/api/run/${jobId}/videos`).then(r => r.json());
+      if (videos.length > 1) {
+        const tabs = videos.map(v =>
+          `<button class="btn btn-sm btn-ghost" onclick="playVideo('${jobId}',${v.tab})" style="margin-right:.3rem">${v.label}</button>`
+        ).join('');
+        document.getElementById('video-modal-title').innerHTML =
+          `Recording: ${jobId} &nbsp; ${tabs}`;
+        tab = 1;
+      } else {
+        document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
+        tab = 1;
+      }
+    } catch(e) {
+      document.getElementById('video-modal-title').textContent = `Recording: ${jobId}`;
+      tab = 1;
+    }
+  }
+  const player = document.getElementById('run-video-player');
+  player.src = `/api/run/${jobId}/video?tab=${tab}&token=${token}`;
+  document.getElementById('video-overlay').classList.remove('hidden');
+  player.play().catch(e => console.warn('Autoplay prevented', e));
+}
+
+function closeVideoModal() {
+  document.getElementById('video-overlay').classList.add('hidden');
+  const player = document.getElementById('run-video-player');
+  player.pause();
+  player.src = '';
+}
+
+function backToLogRecipes() {
+  loadRunHistory();
 }
 
 // ── Uploads Tab UI ──────────────────────────────────────────

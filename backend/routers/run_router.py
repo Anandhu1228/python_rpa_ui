@@ -23,6 +23,8 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 RECIPES_DIR = Path(__file__).parent.parent.parent / "storage" / "recipes"
 RECORDINGS_DIR = Path(__file__).parent.parent.parent / "storage" / "recordings"
 RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+CAPTCHA_DIR = Path(__file__).parent.parent.parent / "storage" / "captcha"
+CAPTCHA_DIR.mkdir(parents=True, exist_ok=True)
 
 class ActionReq(BaseModel):
     response: str
@@ -36,23 +38,19 @@ async def start_run(
     start_row: int = Form(1),
     end_row: Optional[int] = Form(None),
 ):
-    # Load recipe
     recipe_path = RECIPES_DIR / f"{recipe_id}.json"
     if not recipe_path.exists():
         raise HTTPException(404, "Recipe not found")
     recipe = json.loads(recipe_path.read_text())
 
-    # Save uploaded file
     job_id = str(uuid.uuid4())[:8]
     suffix = ".xlsx" if file.filename.endswith(".xlsx") else ".csv"
     upload_path = UPLOADS_DIR / f"{job_id}{suffix}"
     content = await file.read()
     upload_path.write_bytes(content)
 
-    # Create job
     job_store.create(job_id, recipe.get("name", "Unknown Recipe"))
 
-    # Run in background thread (Playwright is sync)
     def _run():
         run_job(job_id, recipe, str(upload_path), start_row, end_row)
 
@@ -89,7 +87,6 @@ async def get_run(job_id: str):
 
 @router.get("/run/{job_id}/logs")
 async def get_logs(job_id: str, since: int = 0):
-    """Polling fallback — returns logs from line `since`."""
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(404, "Job not found")
@@ -104,7 +101,6 @@ async def get_logs(job_id: str, since: int = 0):
 
 @router.get("/run/{job_id}/video")
 async def get_video(job_id: str, tab: int = 1):
-    """Get recording. tab=1 for main tab, tab=2,3... for new tabs opened during run."""
     if tab <= 1:
         vid_path = RECORDINGS_DIR / f"{job_id}.webm"
     else:
@@ -115,7 +111,6 @@ async def get_video(job_id: str, tab: int = 1):
 
 @router.get("/run/{job_id}/videos")
 async def list_videos(job_id: str):
-    """List all available recording tabs for a job."""
     available = []
     main = RECORDINGS_DIR / f"{job_id}.webm"
     if main.exists():
@@ -130,15 +125,17 @@ async def list_videos(job_id: str):
 @router.delete("/run/{job_id}")
 async def delete_run(job_id: str):
     job_store.delete(job_id)
-    vid_path = RECORDINGS_DIR / f"{job_id}.webm"
-    if vid_path.exists():
-        vid_path.unlink()
+    for pattern in [f"{job_id}.webm"] + [f"{job_id}_tab{t}.webm" for t in range(2, 10)]:
+        vid_path = RECORDINGS_DIR / pattern
+        if vid_path.exists():
+            vid_path.unlink()
+    for cap_file in CAPTCHA_DIR.glob(f"{job_id}_*.png"):
+        cap_file.unlink()
     return {"deleted": job_id}
 
 
 @router.get("/uploads")
 async def list_uploads():
-    """List all uploaded data files for management UI."""
     files = []
     for f in UPLOADS_DIR.iterdir():
         if f.is_file() and not f.name.startswith("."):
@@ -154,14 +151,12 @@ async def list_uploads():
                 "job_status": job_status,
                 "recipe_name": recipe_name
             })
-    # Sort files by newest first
     files.sort(key=lambda x: (UPLOADS_DIR / x["filename"]).stat().st_mtime, reverse=True)
     return files
 
 
 @router.delete("/uploads/{filename}")
 async def delete_upload(filename: str):
-    """Delete a specific uploaded data file."""
     p = UPLOADS_DIR / filename
     if p.exists():
         p.unlink()
