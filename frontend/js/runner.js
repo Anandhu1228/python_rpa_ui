@@ -500,6 +500,7 @@ function appendUserEvent(ev) {
 function _buildUserEventNode(ev) {
   const wrap = document.createElement('div');
   wrap.className = 'uf-entry';
+  wrap.style.marginBottom = '0.75rem';
 
   switch (ev._t) {
 
@@ -582,7 +583,7 @@ function _buildUserEventNode(ev) {
         wrap.innerHTML = `<div class="uf-bubble uf-err uf-row-result">❌ Row failed</div>`;
       }
       // Add spacing after each row result
-      wrap.style.marginBottom = '1.25rem';
+      wrap.style.marginBottom = '2.5rem';
       break;
     }
 
