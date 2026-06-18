@@ -132,7 +132,29 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: 
 
     # ── split_fill: split a value across multiple input boxes ──
     if field_type == "split_fill":
-        source_value = resolve_value(field_cfg, row)
+        source = field_cfg.get("source", "csv_column")
+        if source == "human_input":
+            question = field_cfg.get("human_input_question", "Please provide the required input:")
+            if job_id:
+                log(job_id, f"    → [Human Input] Waiting for operator: {question}")
+                job_store.set_pending_action(job_id, {"type": "human_input", "question": question})
+                waited = 0
+                resp = None
+                while waited < 300:
+                    resp = job_store.get_action_response(job_id)
+                    if resp:
+                        break
+                    time.sleep(1)
+                    waited += 1
+                job_store.clear_action(job_id)
+                if not resp:
+                    raise FieldError(f"Human input timed out for: {question}")
+                log(job_id, f"    ✓ [Human Input] Received. Splitting across boxes...")
+                source_value = resp
+            else:
+                source_value = ""
+        else:
+            source_value = resolve_value(field_cfg, row)
         boxes = field_cfg.get("split_boxes", [])  # [{selector, length}]
         pos = 0
         for box in boxes:

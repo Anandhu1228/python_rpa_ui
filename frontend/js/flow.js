@@ -541,9 +541,17 @@ function renderMappingRow(stepId, m) {
   let splitFillHtml = '';
   if (m.field_type === 'split_fill') {
     const boxes = m.split_boxes || [];
+    const humanInputQuestionHtml = m.source === 'human_input' ? `
+      <div style="margin-bottom:.5rem;">
+        <div style="font-size:.75rem; color:var(--accent); font-weight:600; margin-bottom:.3rem;">Question to ask operator</div>
+        <input class="input" style="font-size:.85rem" placeholder="e.g. Enter the OTP sent to the user's mobile"
+          value="${esc(m.human_input_question||'')}"
+          onchange="updateMapping('${stepId}',${m._id},'human_input_question',this.value)">
+      </div>` : '';
     splitFillHtml = `
     <div style="grid-column:1/-1; padding:.5rem; background: var(--bg); border-radius: var(--radius-sm); margin-bottom:.5rem; border: 1px solid var(--border);">
       <div style="font-size:.75rem; color:var(--text3); font-weight:600; margin-bottom:.4rem;">Split Boxes — one row per input box (filled left to right)</div>
+      ${humanInputQuestionHtml}
       ${boxes.map((box, bi) => `
         <div class="row gap-sm" style="margin-bottom:.3rem">
           <input class="input flex-1" placeholder="Selector e.g. #aadhaar_1" style="font-size:.8rem"
@@ -592,11 +600,17 @@ function renderMappingValue(stepId, m) {
     return `<div style="font-size:.8rem;color:var(--accent);padding:.4rem .5rem;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--accent);">Human Input</div>`;
   }
 
-  // split_fill: value comes from CSV column
+  // split_fill: value comes from CSV column or human input
   if (m.field_type === 'split_fill') {
+    if (m.source === 'human_input') {
+      return `<div style="font-size:.8rem;color:var(--accent);padding:.4rem .5rem;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--accent);">Human Input</div>`;
+    }
     return `
       <div class="row gap-sm" style="min-width:0">
-        <span style="font-size:.8rem;color:var(--text3);padding:.4rem 0;white-space:nowrap">CSV col:</span>
+        <select class="input" style="width:110px;flex-shrink:0" onchange="updateMapping('${stepId}',${m._id},'source',this.value)">
+          <option value="csv_column" ${m.source !== 'human_input' ? 'selected' : ''}>CSV col</option>
+          <option value="human_input" ${m.source === 'human_input' ? 'selected' : ''}>Human Input</option>
+        </select>
         <input class="input flex-1" placeholder="CSV header name"
           value="${esc(m.csv_column)}"
           onchange="updateMapping('${stepId}',${m._id},'csv_column',this.value)">

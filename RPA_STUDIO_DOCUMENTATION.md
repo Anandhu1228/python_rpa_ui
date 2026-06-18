@@ -220,7 +220,16 @@ For values that can't be known ahead of time (an OTP, for example):
 
 ## 10. Split-box fields (`field_type: "split_fill"`)
 
-For UIs that split one logical value across several boxes (e.g. an Aadhaar number across 3 four-digit inputs). Config lives on the mapping as `split_boxes: [{selector, length}]`. The worker resolves the value once (via the normal `source`/`csv_column`/`literal` rules), then walks the boxes left to right, slicing out `length` characters for each box and filling it — independently of the row's normal field-fill error handling (a failure on one box just logs a warning and continues to the next box).
+For UIs that split one logical value across several boxes (e.g. an Aadhaar number across 3 four-digit inputs). Config lives on the mapping as `split_boxes: [{selector, length}]`. The worker resolves the value once (via the normal `source`/`csv_column`/`literal` rules, or via human-in-the-loop if `source` is `"human_input"`), then walks the boxes left to right, slicing out `length` characters for each box and filling it — independently of the row's normal field-fill error handling (a failure on one box just logs a warning and continues to the next box).
+
+**`source` options for `split_fill`:**
+
+| source | Behavior |
+|---|---|
+| `csv_column` (default) | Resolves from the named CSV column and splits across the boxes |
+| `human_input` | Pauses the run and asks the operator (same mechanism as `field_type: "human_input"` — see §9); the operator's typed response is used as the value to split across the boxes. Use this for OTPs or any other split-box value that cannot be known in advance. Set `human_input_question` on the mapping to control the prompt shown to the operator. |
+
+In the Flow Builder UI, when `split_fill` is selected as the field type, the value source selector offers "CSV col" and "Human Input". Choosing "Human Input" reveals a question field (same as for `field_type: "human_input"`) and hides the CSV column input.
 
 ---
 
@@ -372,7 +381,7 @@ Theme toggle (dark/light) is stored in `localStorage['theme']` and applied via `
 
 ## 19. Changes made in this pass
 
-Exactly three things were changed, only where necessary — no unrelated code was touched.
+Exactly four things were changed, only where necessary — no unrelated code was touched.
 
 ### A. Moved the "+ Add Step" button to the bottom of the Flow Steps card
 **File:** `frontend/index.html`
@@ -387,6 +396,14 @@ A new "Upload JSON" button (next to "Download JSON") opens a file picker. The se
 Two independent bugs were contributing to "only the first tab's recording is there":
 1. **Backend:** the end-of-run save loop only iterated `context.pages` (pages still open *right now*), so a popup tab that had already been closed during the run (e.g. by the SurePass widget itself) was invisible to it and never got its video saved. Fixed by tracking every page from creation via a `context.on("page", ...)` listener into a persistent list, and saving from that list instead.
 2. **Frontend:** in the video modal, switching to any tab other than the first called `playVideo('', tab)` with an empty job ID, which could never have worked. Fixed to pass the real job ID through.
+
+### D. Added `human_input` source support for `split_fill` fields
+**Files:** `frontend/js/flow.js`, `backend/workers/playwright_worker.py`
+Previously, `split_fill` mappings only accepted a CSV column as their value source. This is wrong for cases like an OTP entered across split boxes — the value cannot come from a CSV because it is unknown at run time.
+
+**`frontend/js/flow.js`:** The `renderMappingValue()` function's `split_fill` branch was extended to show a source selector ("CSV col" / "Human Input") instead of a hardcoded CSV-only input. When "Human Input" is selected, the source column input is replaced by the same accent-coloured "Human Input" badge used by `field_type: "human_input"`, and the `splitFillHtml` block inside `renderMappingRow()` gains a conditional question-prompt input (identical in appearance to the one on `human_input` mappings) that only renders when `source === 'human_input'`.
+
+**`backend/workers/playwright_worker.py`:** The `split_fill` branch in `fill_field()` was extended: instead of unconditionally calling `resolve_value()`, it first checks `field_cfg.get("source")`. If the source is `"human_input"`, it runs the same pause-poll-respond loop as `field_type: "human_input"` (5-minute timeout, `set_pending_action` / `get_action_response` / `clear_action`, raises `FieldError` on timeout), then uses the operator's response as the `source_value` to split across the boxes. For any other source it falls through to `resolve_value()` as before.
 
 ---
 
