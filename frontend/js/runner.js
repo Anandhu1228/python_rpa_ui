@@ -168,10 +168,7 @@ function handleRunAction(action) {
   }
   if (action.type === 'captcha') {
     actionCard.classList.remove('hidden');
-    document.getElementById('action-content').innerHTML = `
-      <div style="color: var(--text2); font-size: .85rem; margin-bottom: .5rem;">Please read the characters below and enter them:</div>
-      <img src="data:image/png;base64,${action.image_b64}" style="max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff;">
-    `;
+    document.getElementById('action-content').innerHTML = '';
     const inp = document.getElementById('action-input');
     inp.value = '';
     inp.focus();
@@ -180,9 +177,7 @@ function handleRunAction(action) {
   }
   if (action.type === 'human_input') {
     actionCard.classList.remove('hidden');
-    document.getElementById('action-content').innerHTML = `
-      <div style="color: var(--text2); font-size: .9rem;">${esc(action.question || 'Please provide the required input:')}</div>
-    `;
+    document.getElementById('action-content').innerHTML = '';
     const inp = document.getElementById('action-input');
     inp.value = '';
     inp.placeholder = 'Type your answer here...';
@@ -505,6 +500,7 @@ function _buildUserEventNode(ev) {
   switch (ev._t) {
 
     case 'start': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-system">▶ Started processing <strong>${ev.total}</strong> record${ev.total !== 1 ? 's' : ''} (rows ${ev.start}–${ev.end})</div>`;
       break;
     }
@@ -586,6 +582,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'row_done': {
+      wrap.style.marginLeft = '1.5rem';
       if (ev.success) {
         wrap.innerHTML = `<div class="uf-bubble uf-ok uf-row-result">✅ Row completed successfully</div>`;
       } else {
@@ -597,6 +594,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'summary': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
         <div class="uf-bubble uf-system uf-summary">
           <div style="font-weight:700;margin-bottom:.4rem;">📊 Run Complete</div>
