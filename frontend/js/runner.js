@@ -514,7 +514,11 @@ function _buildUserEventNode(ev) {
     }
 
     case 'navigate': {
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(ev.url)}</span></div>`;
+      let cleanUrl = ev.url || '';
+      if (cleanUrl.length > 75 && cleanUrl.includes('?')) {
+        cleanUrl = cleanUrl.split('?')[0] + '?...';
+      }
+      wrap.innerHTML = `<div class="uf-bubble uf-action">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(cleanUrl)}</span></div>`;
       break;
     }
 
@@ -525,12 +529,12 @@ function _buildUserEventNode(ev) {
     }
 
     case 'new_tab': {
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🗖 Switched to new tab &mdash; <span class="uf-url">${esc(ev.url)}</span></div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action">🗖 Switched to new tab</div>`;
       break;
     }
 
     case 'reached': {
-      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ <strong>${esc(ev.label)}</strong> completed &mdash; now at <span class="uf-url">${esc(ev.url)}</span></div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ <strong>${esc(ev.label)}</strong> completed</div>`;
       break;
     }
 
