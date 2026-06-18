@@ -17,6 +17,7 @@ function addFlowStep() {
     wait_for_url: '',
     wait_for_selector: '',
     skip_if_no_data: false,
+    opens_new_tab: false,
     _open: true,
     inspection_steps: [], 
     requires_captcha: false,
@@ -39,7 +40,7 @@ function toggleStep(id) {
 function updateStep(id, key, val) {
   const s = flowSteps.find(s => s._id === id);
   if (s) s[key] = val;
-  if (key === 'requires_captcha') renderFlowSteps();
+  if (key === 'requires_captcha' || key === 'opens_new_tab') renderFlowSteps();
 }
 
 function moveStep(id, dir) {
@@ -471,6 +472,13 @@ function renderFlowSteps() {
               Skip if no CSV data
             </label>
           </div>
+          <div class="form-group" style="justify-content:flex-end;padding-top:.5rem">
+            <label class="toggle-label">
+              <input type="checkbox" ${step.opens_new_tab?'checked':''}
+                onchange="updateStep('${step._id}','opens_new_tab',this.checked)">
+              Submit opens new tab
+            </label>
+          </div>
         </div>
 
         <div style="margin-bottom:.5rem;font-size:.82rem;font-weight:600;color:var(--text2)">Field Mappings</div>
@@ -491,7 +499,7 @@ function renderFlowSteps() {
 }
 
 function renderMappingRow(stepId, m) {
-  const ftypes = ['text','password','email','tel','number','textarea','select','radio','checkbox','click'];
+  const ftypes = ['text','password','email','tel','number','textarea','select','radio','checkbox','click','human_input','split_fill'];
   
   let valueMapHtml = '';
   if (m.value_map && m.value_map.length > 0) {
@@ -516,6 +524,41 @@ function renderMappingRow(stepId, m) {
      hintHtml = `<div style="grid-column:1/-1; font-size:.75rem; color:var(--text3); margin-top:-.3rem; margin-bottom:.4rem; padding-left:.5rem;">Detected HTML value: <b style="color:var(--text);font-family:var(--mono)">${esc(m.extracted_value)}</b></div>`;
   }
 
+  // human_input: show question field
+  let humanInputHtml = '';
+  if (m.field_type === 'human_input') {
+    humanInputHtml = `
+    <div style="grid-column:1/-1; padding:.5rem; background: var(--bg); border-radius: var(--radius-sm); margin-bottom:.5rem; border: 1px solid var(--accent);">
+      <div style="font-size:.75rem; color:var(--accent); font-weight:600; margin-bottom:.3rem;">Question to ask operator</div>
+      <input class="input" style="font-size:.85rem" placeholder="e.g. Enter the OTP sent to the user's mobile"
+        value="${esc(m.human_input_question||'')}"
+        onchange="updateMapping('${stepId}',${m._id},'human_input_question',this.value)">
+      <div style="font-size:.75rem; color:var(--text3); margin-top:.3rem;">Answer will be filled into: <b>${esc(m.selector||'(selector above)')}</b></div>
+    </div>`;
+  }
+
+  // split_fill: show per-box selector+length config
+  let splitFillHtml = '';
+  if (m.field_type === 'split_fill') {
+    const boxes = m.split_boxes || [];
+    splitFillHtml = `
+    <div style="grid-column:1/-1; padding:.5rem; background: var(--bg); border-radius: var(--radius-sm); margin-bottom:.5rem; border: 1px solid var(--border);">
+      <div style="font-size:.75rem; color:var(--text3); font-weight:600; margin-bottom:.4rem;">Split Boxes — one row per input box (filled left to right)</div>
+      ${boxes.map((box, bi) => `
+        <div class="row gap-sm" style="margin-bottom:.3rem">
+          <input class="input flex-1" placeholder="Selector e.g. #aadhaar_1" style="font-size:.8rem"
+            value="${esc(box.selector||'')}"
+            onchange="updateSplitBox('${stepId}',${m._id},${bi},'selector',this.value)">
+          <input class="input" style="width:80px;font-size:.8rem" type="number" min="1" placeholder="Length"
+            value="${box.length||1}"
+            onchange="updateSplitBox('${stepId}',${m._id},${bi},'length',parseInt(this.value)||1)">
+          <button class="btn btn-sm btn-danger" onclick="removeSplitBox('${stepId}',${m._id},${bi})">✕</button>
+        </div>
+      `).join('')}
+      <button class="btn btn-sm btn-ghost" onclick="addSplitBox('${stepId}',${m._id})" style="margin-top:.2rem">+ Add Box</button>
+    </div>`;
+  }
+
   return `
     <div class="mapping-row" id="mrow-${m._id}">
       <input class="input" placeholder='[name="field"] or #id'
@@ -537,11 +580,30 @@ function renderMappingRow(stepId, m) {
         value="${esc(m.radio_name||'')}"
         onchange="updateMapping('${stepId}',${m._id},'radio_name',this.value)">
     </div>` : ''}
+    ${humanInputHtml}
+    ${splitFillHtml}
     ${valueMapHtml}
   `;
 }
 
 function renderMappingValue(stepId, m) {
+  // human_input: source is implicit, no CSV/literal selector needed here
+  if (m.field_type === 'human_input') {
+    return `<div style="font-size:.8rem;color:var(--accent);padding:.4rem .5rem;background:var(--bg);border-radius:var(--radius-sm);border:1px solid var(--accent);">Human Input</div>`;
+  }
+
+  // split_fill: value comes from CSV column
+  if (m.field_type === 'split_fill') {
+    return `
+      <div class="row gap-sm" style="min-width:0">
+        <span style="font-size:.8rem;color:var(--text3);padding:.4rem 0;white-space:nowrap">CSV col:</span>
+        <input class="input flex-1" placeholder="CSV header name"
+          value="${esc(m.csv_column)}"
+          onchange="updateMapping('${stepId}',${m._id},'csv_column',this.value)">
+      </div>
+    `;
+  }
+
   if (m.source === 'literal') {
     const isPass = m.field_type === 'password';
     return `
@@ -568,6 +630,35 @@ function renderMappingValue(stepId, m) {
         onchange="updateMapping('${stepId}',${m._id},'csv_column',this.value)">
     </div>
   `;
+}
+
+// ── Split box management (for split_fill field type) ────────
+
+function addSplitBox(stepId, mappingId) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s && s.field_mappings.find(m => m._id === mappingId);
+  if (m) {
+    if (!m.split_boxes) m.split_boxes = [];
+    m.split_boxes.push({ selector: '', length: 4 });
+    renderFlowSteps();
+  }
+}
+
+function updateSplitBox(stepId, mappingId, bi, key, val) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s && s.field_mappings.find(m => m._id === mappingId);
+  if (m && m.split_boxes && m.split_boxes[bi]) {
+    m.split_boxes[bi][key] = val;
+  }
+}
+
+function removeSplitBox(stepId, mappingId, bi) {
+  const s = flowSteps.find(s => s._id === stepId);
+  const m = s && s.field_mappings.find(m => m._id === mappingId);
+  if (m && m.split_boxes) {
+    m.split_boxes.splice(bi, 1);
+    renderFlowSteps();
+  }
 }
 
 // ── Save / Load / Clear ─────────────────────────────────────
@@ -621,6 +712,7 @@ function buildRecipePayload() {
     })),
     captcha_image_selector: s.requires_captcha ? s.captcha_image_selector : '',
     captcha_input_selector: s.requires_captcha ? s.captcha_input_selector : '',
+    opens_new_tab: !!s.opens_new_tab,
     field_mappings: (s.field_mappings || []).map(m => ({
       selector: m.selector,
       field_type: m.field_type,
@@ -629,8 +721,10 @@ function buildRecipePayload() {
       csv_column: m.csv_column || '',
       literal_value: m.literal_value || '',
       label: m.label || m.selector,
-      options: m.options, 
+      options: m.options,
       extracted_value: m.extracted_value,
+      human_input_question: m.human_input_question || '',
+      split_boxes: m.split_boxes || [],
       value_map: (m.value_map || []).map(v => ({ from_val: v.from_val, to_val: v.to_val }))
     })),
     submit_selector: s.submit_selector || '',
@@ -683,6 +777,7 @@ function loadRecipeIntoFlow(recipe) {
     requires_captcha: !!(s.captcha_image_selector && s.captcha_input_selector),
     captcha_image_selector: s.captcha_image_selector || '',
     captcha_input_selector: s.captcha_input_selector || '',
+    opens_new_tab: !!s.opens_new_tab,
     inspection_steps: (s.inspection_steps || []).map(is => ({
       ...is,
       _id: Date.now() + Math.random(),
@@ -693,6 +788,8 @@ function loadRecipeIntoFlow(recipe) {
       _id: Date.now() + Math.random(),
       options: m.options || [],
       extracted_value: m.extracted_value || '',
+      human_input_question: m.human_input_question || '',
+      split_boxes: m.split_boxes || [],
       value_map: m.value_map || [] 
     })),
   }));

@@ -57,15 +57,18 @@ def load_data_file(path: str) -> List[Dict[str, str]]:
 def resolve_value(mapping: Dict, row: Dict[str, str]) -> str:
     """
     A mapping entry has:
-      - source: "csv_column" | "literal"
+      - source: "csv_column" | "literal" | "human_input"
       - csv_column: str  (header name from file)
       - literal_value: str
       - value_map: List[Dict] (from_val -> to_val)
     Returns the resolved string value for this row.
+    human_input source returns "" here — handled separately in fill_field.
     """
     source = mapping.get("source", "csv_column")
     if source == "literal":
         val = mapping.get("literal_value", "")
+    elif source == "human_input":
+        return ""   # handled separately via pending_action
     else:
         col = mapping.get("csv_column", "")
         val = row.get(col, "").strip()
@@ -93,13 +96,63 @@ def human_delay(ms: int, jitter_pct: float = 0.2):
 #  Field-filling logic
 # ──────────────────────────────────────────────────────────────
 
-def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict):
+def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: str = None):
     """Fill a single field according to its config."""
     selector   = field_cfg.get("selector", "")
-    field_type = field_cfg.get("field_type", "text")   # text|password|email|radio|checkbox|select|textarea|click
+    field_type = field_cfg.get("field_type", "text")   # text|password|email|radio|checkbox|select|textarea|click|split_fill|human_input
     value      = resolve_value(field_cfg, row)
     char_delay = delay.get("char_delay_ms", 0)
     action_to  = delay.get("action_timeout_ms", 8000)
+
+    # ── human_input: pause and ask operator, then fill selector ──
+    if field_type == "human_input":
+        question = field_cfg.get("human_input_question", "Please provide the required input:")
+        if job_id:
+            log(job_id, f"    → [Human Input] Waiting for operator: {question}")
+            job_store.set_pending_action(job_id, {"type": "human_input", "question": question})
+            waited = 0
+            resp = None
+            while waited < 300:
+                resp = job_store.get_action_response(job_id)
+                if resp:
+                    break
+                time.sleep(1)
+                waited += 1
+            job_store.clear_action(job_id)
+            if not resp:
+                raise FieldError(f"Human input timed out for: {question}")
+            log(job_id, f"    ✓ [Human Input] Received. Filling '{selector}'...")
+            if selector:
+                el = page.locator(selector).first
+                el.wait_for(state="visible", timeout=action_to)
+                el.click(timeout=action_to)
+                el.fill("", timeout=action_to)
+                el.fill(resp, timeout=action_to)
+        return
+
+    # ── split_fill: split a value across multiple input boxes ──
+    if field_type == "split_fill":
+        source_value = resolve_value(field_cfg, row)
+        boxes = field_cfg.get("split_boxes", [])  # [{selector, length}]
+        pos = 0
+        for box in boxes:
+            box_sel = box.get("selector", "")
+            box_len = int(box.get("length", 1))
+            chunk = source_value[pos:pos + box_len]
+            pos += box_len
+            if not box_sel:
+                continue
+            try:
+                el = page.locator(box_sel).first
+                el.wait_for(state="visible", timeout=action_to)
+                el.click(timeout=action_to)
+                el.fill("", timeout=action_to)
+                el.fill(chunk, timeout=action_to)
+                human_delay(delay.get("between_fields_ms", 100))
+            except Exception as e:
+                if job_id:
+                    log(job_id, f"    ⚠ split_fill box '{box_sel}': {e}")
+        return
 
     if not value and field_type not in ("checkbox", "click"):
         return  # nothing to fill
@@ -183,7 +236,7 @@ def execute_login_steps(page, login_steps: List[Dict], delay: Dict, job_id: str)
         for field_cfg in step.get("fields", []):
             try:
                 # login credentials are literal values
-                fill_field(page, field_cfg, {}, delay)
+                fill_field(page, field_cfg, {}, delay, job_id)
                 human_delay(delay.get("between_fields_ms", 100))
             except FieldError as e:
                 log(job_id, f"    ⚠ {e}")
@@ -206,8 +259,8 @@ def execute_login_steps(page, login_steps: List[Dict], delay: Dict, job_id: str)
 #  Single flow step
 # ──────────────────────────────────────────────────────────────
 
-def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str) -> bool:
-    """Execute one flow step for one CSV row. Returns True on success."""
+def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str):
+    """Execute one flow step for one CSV row. Returns (success: bool, active_page)."""
     label     = step.get("label", step.get("step_id", "?"))
     url       = step.get("url", "")
     page_to   = delay.get("page_load_timeout_ms", 15000)
@@ -222,7 +275,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         )
         if not has_data:
             log(job_id, f"    → Skipping step '{label}' (no data)")
-            return True
+            return True, page
 
     # Navigate if URL given
     if url:
@@ -233,7 +286,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
     # Fill fields
     for fm in step.get("field_mappings", []):
         try:
-            fill_field(page, fm, row, delay)
+            fill_field(page, fm, row, delay, job_id)
             human_delay(delay.get("between_fields_ms", 100))
         except FieldError as e:
             log(job_id, f"    ⚠ {e}")
@@ -267,7 +320,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
 
             if not resp:
                 log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
-                return False
+                return False, page
 
             log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
             inp = page.locator(cap_inp_sel).first
@@ -278,16 +331,28 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         except Exception as e:
             log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
             job_store.clear_action(job_id)
-            return False
+            return False, page
 
     # Submit
     submit_sel = step.get("submit_selector", "")
+    opens_new_tab = step.get("opens_new_tab", False)
+
     if submit_sel:
         try:
-            page.locator(submit_sel).first.click(timeout=action_to)
+            if opens_new_tab:
+                # Capture the new tab that opens after this click
+                log(job_id, f"    → [{label}] Clicking (expects new tab)...")
+                with page.context.expect_page() as new_page_info:
+                    page.locator(submit_sel).first.click(timeout=action_to)
+                new_page = new_page_info.value
+                new_page.wait_for_load_state("networkidle", timeout=page_to)
+                log(job_id, f"    ✓ New tab opened: {new_page.url}")
+                return True, new_page   # caller switches to new_page
+            else:
+                page.locator(submit_sel).first.click(timeout=action_to)
         except Exception as e:
             log(job_id, f"    ✗ Submit failed on step '{label}': {e}")
-            return False
+            return False, page
 
     # Wait for URL
     wait_url = step.get("wait_for_url", "")
@@ -308,7 +373,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
             if errors:
                 clean = [e.strip() for e in errors if e.strip()]
                 log(job_id, f"    ✗ Page errors: {clean}")
-            return False
+            return False, page
 
     # Wait for selector
     wait_sel = step.get("wait_for_selector", "")
@@ -318,7 +383,7 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         except Exception:
             log(job_id, f"    ⚠ Step '{label}' — selector '{wait_sel}' not found")
 
-    return True
+    return True, page
 
 
 # ──────────────────────────────────────────────────────────────
@@ -386,9 +451,10 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 log(job_id, f"{'='*56}")
 
                 row_ok = True
+                active_page = page   # tracks current page; may switch on opens_new_tab
                 for step in flow:
                     try:
-                        ok = execute_step(page, step, row, delay, job_id)
+                        ok, active_page = execute_step(active_page, step, row, delay, job_id)
                         if not ok:
                             row_ok = False
                             break

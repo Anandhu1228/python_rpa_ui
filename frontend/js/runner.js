@@ -175,8 +175,18 @@ function handleRunAction(action) {
     const inp = document.getElementById('action-input');
     inp.value = '';
     inp.focus();
-    
-    // Auto-scroll so the user sees the chat window
+    const terminal = document.getElementById('log-terminal');
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+  if (action.type === 'human_input') {
+    actionCard.classList.remove('hidden');
+    document.getElementById('action-content').innerHTML = `
+      <div style="color: var(--text2); font-size: .9rem;">${esc(action.question || 'Please provide the required input:')}</div>
+    `;
+    const inp = document.getElementById('action-input');
+    inp.value = '';
+    inp.placeholder = 'Type your answer here...';
+    inp.focus();
     const terminal = document.getElementById('log-terminal');
     terminal.scrollTop = terminal.scrollHeight;
   }

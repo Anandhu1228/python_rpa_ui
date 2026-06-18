@@ -34,6 +34,7 @@ class FlowStep(BaseModel):
     wait_for_url: Optional[str] = None      # URL substring to wait for after submit
     wait_for_selector: Optional[str] = None
     skip_if_no_data: bool = False           # skip step if all mapped columns are empty
+    opens_new_tab: bool = False             # click opens a new browser tab — switch to it
 
 
 class DelayConfig(BaseModel):
