@@ -321,7 +321,7 @@
       <span id="video-modal-title" style="color: var(--text)">Recording</span>
       <button class="btn btn-sm btn-ghost" onclick="closeVideoModal()">✕</button>
     </div>
-    <video id="run-video-player" controls style="width: 100%; max-height: 75vh; display: block;"></video>
+    <video id="run-video-player" controls style="width: 100%; max-height: 75vh; display: block;" onclick="event.stopPropagation()"></video>
   </div>
 </div>
 
