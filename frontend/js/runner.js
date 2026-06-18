@@ -515,6 +515,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'navigate': {
+      wrap.style.marginLeft = '1.5rem';
       let cleanUrl = ev.url || '';
       if (cleanUrl.length > 75 && cleanUrl.includes('?')) {
         cleanUrl = cleanUrl.split('?')[0] + '?...';
@@ -524,22 +525,26 @@ function _buildUserEventNode(ev) {
     }
 
     case 'click': {
+      wrap.style.marginLeft = '1.5rem';
       const ctx = ev.context === 'new tab' ? ' (new tab)' : '';
       wrap.innerHTML = `<div class="uf-bubble uf-action">🖱 Clicked <code>${esc(ev.selector)}</code>${ctx}</div>`;
       break;
     }
 
     case 'new_tab': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-action">🗖 Switched to new tab</div>`;
       break;
     }
 
     case 'reached': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ <strong>${esc(ev.label)}</strong> completed</div>`;
       break;
     }
 
     case 'ask': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
         <div class="uf-bubble uf-question">
           <span class="uf-q-icon">❓</span>
@@ -549,6 +554,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'answer': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
         <div class="uf-answer-row">
           <div class="uf-bubble uf-question" style="opacity:.6;font-size:.8rem;">${esc(ev.question)}</div>
@@ -558,6 +564,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'captcha': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
         <div class="uf-bubble uf-captcha">
           <div class="uf-captcha-label">🔒 CAPTCHA — please solve:</div>
@@ -567,11 +574,13 @@ function _buildUserEventNode(ev) {
     }
 
     case 'captcha_answer': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-reply">✍ CAPTCHA answer entered: <strong>${esc(ev.answer)}</strong></div>`;
       break;
     }
 
     case 'captcha_timeout': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-err">⏱ CAPTCHA timed out — no response received</div>`;
       break;
     }
@@ -598,6 +607,7 @@ function _buildUserEventNode(ev) {
     }
 
     case 'info': {
+      wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-system">${esc(ev.msg)}</div>`;
       break;
     }
