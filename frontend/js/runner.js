@@ -168,10 +168,7 @@ function handleRunAction(action) {
   }
   if (action.type === 'captcha') {
     actionCard.classList.remove('hidden');
-    document.getElementById('action-content').innerHTML = `
-      <div style="color: var(--text2); font-size: .85rem; margin-bottom: .5rem;">Please read the characters below and enter them:</div>
-      <img src="data:image/png;base64,${action.image_b64}" style="max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #fff;">
-    `;
+    document.getElementById('action-content').innerHTML = '';
     const inp = document.getElementById('action-input');
     inp.value = '';
     inp.focus();
@@ -180,9 +177,7 @@ function handleRunAction(action) {
   }
   if (action.type === 'human_input') {
     actionCard.classList.remove('hidden');
-    document.getElementById('action-content').innerHTML = `
-      <div style="color: var(--text2); font-size: .9rem;">${esc(action.question || 'Please provide the required input:')}</div>
-    `;
+    document.getElementById('action-content').innerHTML = '';
     const inp = document.getElementById('action-input');
     inp.value = '';
     inp.placeholder = 'Type your answer here...';
@@ -505,7 +500,7 @@ function _buildUserEventNode(ev) {
   switch (ev._t) {
 
     case 'start': {
-      wrap.innerHTML = `<div class="uf-bubble uf-system">▶ Started processing <strong>${ev.total}</strong> record${ev.total !== 1 ? 's' : ''} (rows ${ev.start}–${ev.end})</div>`;
+      wrap.innerHTML = `<div style="font-size: .85rem; font-weight: 600; color: var(--text2); padding: .5rem 0;">▶ Started processing <strong>${ev.total}</strong> record${ev.total !== 1 ? 's' : ''} (rows ${ev.start}–${ev.end})</div>`;
       break;
     }
 
@@ -520,7 +515,10 @@ function _buildUserEventNode(ev) {
       if (cleanUrl.length > 75 && cleanUrl.includes('?')) {
         cleanUrl = cleanUrl.split('?')[0] + '?...';
       }
-      wrap.innerHTML = `<div class="uf-bubble uf-action">🌐 <strong>${esc(ev.label)}</strong> &mdash; Opened <span class="uf-url">${esc(cleanUrl)}</span></div>`;
+      wrap.innerHTML = `<div class="uf-bubble uf-action" style="flex-direction: column; gap: .2rem; align-items: flex-start;">
+        <div>🌐 <strong>${esc(ev.label)}</strong></div>
+        <div style="font-size: .75rem; opacity: .8; word-break: break-all;">Opened: <span class="uf-url" style="color: inherit;">${esc(cleanUrl)}</span></div>
+      </div>`;
       break;
     }
 
@@ -586,29 +584,29 @@ function _buildUserEventNode(ev) {
     }
 
     case 'row_done': {
+      wrap.style.marginLeft = '1.5rem';
       if (ev.success) {
         wrap.innerHTML = `<div class="uf-bubble uf-ok uf-row-result">✅ Row completed successfully</div>`;
       } else {
         wrap.innerHTML = `<div class="uf-bubble uf-err uf-row-result">❌ Row failed</div>`;
       }
-      // Add spacing after each row result
+      // Space between entries if multiple in CSV
       wrap.style.marginBottom = '2.5rem';
       break;
     }
 
     case 'summary': {
       wrap.innerHTML = `
-        <div class="uf-bubble uf-system uf-summary">
-          <div style="font-weight:700;margin-bottom:.4rem;">📊 Run Complete</div>
-          <div>✅ Success: <strong>${ev.success}</strong> &nbsp; ❌ Failed: <strong>${ev.failed}</strong></div>
-          ${ev.failed_ids && ev.failed_ids.length ? `<div style="margin-top:.3rem;font-size:.8rem;color:var(--text2)">Failed: ${ev.failed_ids.map(x => esc(String(x))).join(', ')}</div>` : ''}
+        <div style="padding: 1rem 0; margin-top: .5rem; border-top: 1px solid var(--border);">
+          <div style="font-weight:700; font-size: .95rem; margin-bottom:.4rem;">📊 Run Complete</div>
+          <div style="font-size: .85rem; color: var(--text2);">✅ Success: <strong style="color: var(--text);">${ev.success}</strong> &nbsp; ❌ Failed: <strong style="color: var(--text);">${ev.failed}</strong></div>
+          ${ev.failed_ids && ev.failed_ids.length ? `<div style="margin-top:.3rem;font-size:.8rem;color:var(--text3)">Row IDs: ${ev.failed_ids.map(x => esc(String(x))).join(', ')}</div>` : ''}
         </div>`;
       break;
     }
 
     case 'info': {
-      wrap.style.marginLeft = '1.5rem';
-      wrap.innerHTML = `<div class="uf-bubble uf-system">${esc(ev.msg)}</div>`;
+      wrap.innerHTML = `<div style="font-size: .8rem; color: var(--text3); padding-bottom: .25rem;">${esc(ev.msg)}</div>`;
       break;
     }
 
