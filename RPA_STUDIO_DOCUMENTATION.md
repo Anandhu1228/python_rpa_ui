@@ -435,7 +435,7 @@ A new `file_source` field was added to `file_upload` mappings, with three option
 - A module-level `TEMP_ATTACHMENTS_DIR` constant (`storage/temp_attachments/`) is created on import with `mkdir(parents=True, exist_ok=True)`.
 - Inside the `# ── file_upload ──` branch of `fill_field()`, before the file-exists check, a `file_source` dispatch block was added:
   - `local_disk` — expects the file has been placed under `./storage/temp_attachments/` on the host (which maps to `/app/storage/temp_attachments/` inside Docker). Copies it to a job-scoped name in that same directory (to prevent concurrent-run collisions), then cleans up the copy in a `finally` block after `set_input_files()` completes.
-  - `external_url` — treats the CSV value as an HTTP/HTTPS URL. Downloads it with `urllib.request.urlretrieve` into `temp_attachments/` under a job-scoped name, then cleans up in the same `finally` block.
+  - `external_url` — treats the CSV value as an HTTP/HTTPS URL. Before downloading, the URL is inspected: if it matches a Google Drive share URL pattern (`drive.google.com/file/d/FILE_ID/...` or `docs.google.com/.../d/FILE_ID/...`), it is silently rewritten to the direct download format (`drive.google.com/uc?export=download&id=FILE_ID`). The file is then downloaded using `urllib.request.urlopen` (with a browser User-Agent header), reading the `Content-Disposition` response header to obtain the real filename (including extension) — falling back to the URL path only if the header is absent. This ensures MIME detection works correctly for all external URLs, including Google Drive. The downloaded file is saved under a job-scoped name in `temp_attachments/` and cleaned up in the same `finally` block.
   - `server_path` (default) — existing behaviour; no copy/download, no cleanup.
 - A `_temp_file_to_cleanup` variable tracks the temp path (if any) and the `finally` block deletes it unconditionally whether the upload succeeded or raised.
 
@@ -446,6 +446,21 @@ A new `file_source` field was added to `file_upload` mappings, with three option
 - `file_source` included in `loadRecipeIntoFlow()` so it round-trips correctly through save / load / JSON export / JSON import.
 
 See §21 for full usage reference.
+
+### G. Added file upload events to the User feed in the Logs tab
+**Files:** `backend/workers/playwright_worker.py`, `frontend/js/runner.js`
+Previously, file upload activity was only visible in the Developer log view. Four new structured log events were added so the User feed also shows file upload progress.
+
+**`backend/workers/playwright_worker.py`:** Three new `ulog()` calls added inside the `external_url` and upload blocks of `fill_field()`:
+- `file_downloading` — emitted before the HTTP download begins (for `external_url` source only).
+- `file_downloaded` — emitted after the file is successfully saved to `temp_attachments/`, carrying the resolved `filename`.
+- `file_attached` — emitted after `set_input_files()` succeeds, carrying the `filename`. (The existing `file_upload` ulog at the start of the upload step is unchanged.)
+
+**`frontend/js/runner.js`:** Four new `case` blocks added to `_buildUserEventNode()`:
+- `file_downloading` → "⬇ Downloading file from URL…"
+- `file_downloaded` → "✓ Downloaded: **filename**"
+- `file_upload` → "📎 Attaching **filename** (mime)"
+- `file_attached` → "✓ Attached: **filename**"
 
 ---
 
@@ -552,7 +567,7 @@ Added in the same pass as this documentation update. Handles `<input type="file"
 |---|---|---|
 | `server_path` (default) | Absolute path on the server/container filesystem, e.g. `/app/storage/uploads/john.jpg` | File is already on the server (e.g. uploaded via the Uploads tab) |
 | `local_disk` | Absolute container path inside `temp_attachments/`, e.g. `/app/storage/temp_attachments/john.jpg` | File lives on the operator's machine; they copy it to `./storage/temp_attachments/` on the host first |
-| `external_url` | Full HTTP/HTTPS URL, e.g. `https://s3.amazonaws.com/bucket/john.jpg` or an S3 presigned URL | File is on S3 or any public/presigned HTTP endpoint |
+| `external_url` | Full HTTP/HTTPS URL, e.g. `https://s3.amazonaws.com/bucket/john.jpg`, an S3 presigned URL, or a Google Drive share link (`https://drive.google.com/file/d/.../view?usp=...`) | File is on S3, Google Drive, or any public/presigned HTTP endpoint. Google Drive share links are auto-converted to download URLs internally — users do not need to construct the download URL manually. |
 
 ### `local_disk` workflow (Docker)
 
@@ -565,11 +580,17 @@ Because the Docker container cannot see the operator's local filesystem, the fil
 
 > The original file in `temp_attachments/` is **not** deleted — only the job-scoped copy is removed. If you want to clean up the originals, delete them from the Uploads tab or manually from the host folder.
 
-### `external_url` workflow (S3 / remote links)
+### `external_url` workflow (S3 / Google Drive / remote links)
 
-1. In the CSV, put the full URL of the file: `https://s3.amazonaws.com/your-bucket/john.jpg` (or an S3 presigned URL, or any direct HTTP link).
+1. In the CSV, put the full URL of the file. Accepted formats:
+   - Direct HTTP/HTTPS link: `https://s3.amazonaws.com/your-bucket/john.jpg`
+   - S3 presigned URL (time-limited)
+   - Google Drive share link: `https://drive.google.com/file/d/FILE_ID/view?usp=drive_link`
+   - Google Docs/Sheets/Slides share link: `https://docs.google.com/document/d/FILE_ID/edit?usp=drive_link`
 2. Set `file_source` to `external_url` in the Flow Builder.
 3. Run the job — for each row the worker downloads the file to `storage/temp_attachments/` under a job-scoped name, calls `set_input_files()`, then **auto-deletes the downloaded file** immediately after.
+
+> **Google Drive links are handled automatically.** The worker detects `drive.google.com/file/d/...` and `docs.google.com/.../d/...` share URLs and converts them to direct download URLs internally — users just paste the share link as-is. Files must be shared as "Anyone with the link". Files over ~100 MB may trigger Google's virus-scan interstitial and fail to download; for typical form attachments (PDFs, images, documents) this is not a concern.
 
 > Private S3 files must use presigned URLs (which are time-limited). Public S3 URLs or CloudFront URLs work directly.
 

@@ -254,20 +254,39 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: 
             # Download it into temp_attachments/ under a job-scoped name, upload, then delete.
             import urllib.request
             import urllib.parse
+            import re as _re
             url_str = file_path
-            parsed = urllib.parse.urlparse(url_str)
-            url_filename = Path(parsed.path).name or "attachment"
-            dest = TEMP_ATTACHMENTS_DIR / f"{job_id}_{url_filename}"
+            _gdrive_file = _re.search(r'drive\.google\.com/file/d/([^/?#]+)', url_str)
+            _gdocs_file  = _re.search(r'docs\.google\.com/\w+/d/([^/?#]+)', url_str)
+            if _gdrive_file:
+                url_str = f"https://drive.google.com/uc?export=download&id={_gdrive_file.group(1)}"
+            elif _gdocs_file:
+                url_str = f"https://drive.google.com/uc?export=download&id={_gdocs_file.group(1)}"
             if job_id:
-                log(job_id, f"    → [file_upload] external_url: downloading '{url_filename}' to temp_attachments...")
+                log(job_id, f"    → [file_upload] external_url: downloading from URL to temp_attachments...")
+                ulog(job_id, "file_downloading", url=url_str)
             try:
-                urllib.request.urlretrieve(url_str, str(dest))
+                req = urllib.request.Request(url_str, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req) as resp:
+                    content_disposition = resp.headers.get("Content-Disposition", "")
+                    url_filename = None
+                    if content_disposition:
+                        import re
+                        m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', content_disposition, re.IGNORECASE)
+                        if m:
+                            url_filename = urllib.parse.unquote(m.group(1).strip().strip('"\''))
+                    if not url_filename:
+                        parsed = urllib.parse.urlparse(url_str)
+                        url_filename = Path(parsed.path).name or "attachment"
+                    dest = TEMP_ATTACHMENTS_DIR / f"{job_id}_{url_filename}"
+                    dest.write_bytes(resp.read())
             except Exception as dl_err:
                 raise FieldError(f"file_upload (external_url): download failed for '{url_str}': {dl_err}")
             _temp_file_to_cleanup = dest
             p_file = dest
             if job_id:
                 log(job_id, f"    ✓ [file_upload] external_url: downloaded '{url_filename}'")
+                ulog(job_id, "file_downloaded", filename=url_filename)
 
         else:
             # "server_path" (default) — value is already an absolute path on the server filesystem
@@ -327,6 +346,7 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: 
             el.set_input_files(str(p_file), timeout=action_to)
             if job_id:
                 log(job_id, f"    ✓ [file_upload] '{p_file.name}' set successfully.")
+                ulog(job_id, "file_attached", filename=p_file.name)
         except Exception as e:
             raise FieldError(f"file_upload: could not set file on '{selector}': {e}")
         finally:

@@ -564,6 +564,30 @@ function _buildUserEventNode(ev) {
       break;
     }
 
+    case 'file_downloading': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-action">⬇ Downloading file from URL…</div>`;
+      break;
+    }
+
+    case 'file_downloaded': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ Downloaded: <strong>${esc(ev.filename)}</strong></div>`;
+      break;
+    }
+
+    case 'file_upload': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-action">📎 Attaching <strong>${esc(ev.filename)}</strong> <span style="opacity:.6;font-size:.8rem">(${esc(ev.mime)})</span></div>`;
+      break;
+    }
+
+    case 'file_attached': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ Attached: <strong>${esc(ev.filename)}</strong></div>`;
+      break;
+    }
+
     case 'captcha': {
       wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `
