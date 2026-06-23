@@ -124,7 +124,7 @@ def resolve_frame(page, selector: str, timeout_ms: int = 4000):
 #  Field-filling logic
 # ──────────────────────────────────────────────────────────────
 
-def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: str = None):
+def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: str = None, temp_files: list = None):
     selector   = field_cfg.get("selector", "")
     field_type = field_cfg.get("field_type", "text")
     value      = resolve_value(field_cfg, row)
@@ -351,13 +351,17 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: 
             raise FieldError(f"file_upload: could not set file on '{selector}': {e}")
         finally:
             # Clean up any temp file we created (local_disk copy or external_url download)
-            if _temp_file_to_cleanup and _temp_file_to_cleanup.exists():
-                try:
-                    _temp_file_to_cleanup.unlink()
-                    if job_id:
-                        log(job_id, f"    → [file_upload] temp file '{_temp_file_to_cleanup.name}' removed.")
-                except Exception:
-                    pass
+            if _temp_file_to_cleanup:
+                if temp_files is not None:
+                    temp_files.append(_temp_file_to_cleanup)
+                else:
+                    if _temp_file_to_cleanup.exists():
+                        try:
+                            _temp_file_to_cleanup.unlink()
+                            if job_id:
+                                log(job_id, f"    → [file_upload] temp file '{_temp_file_to_cleanup.name}' removed.")
+                        except Exception:
+                            pass
         return
 
     if not value and field_type not in ("checkbox", "click"):
@@ -483,9 +487,10 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         page.goto(url)
         page.wait_for_load_state("networkidle", timeout=page_to)
 
+    _step_temp_files = []
     for fm in step.get("field_mappings", []):
         try:
-            fill_field(page, fm, row, delay, job_id)
+            fill_field(page, fm, row, delay, job_id, temp_files=_step_temp_files)
             human_delay(delay.get("between_fields_ms", 100))
         except FieldError as e:
             log(job_id, f"    ⚠ {e}")
@@ -636,6 +641,14 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
                     continue
         if not found:
             log(job_id, f"    ⚠ Step '{label}' — selector '{wait_sel}' not found")
+
+    for _tf in _step_temp_files:
+        if _tf.exists():
+            try:
+                _tf.unlink()
+                log(job_id, f"    → [file_upload] temp file '{_tf.name}' removed.")
+            except Exception:
+                pass
 
     return True, page
 
