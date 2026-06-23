@@ -202,7 +202,10 @@ function addMapping(stepId) {
     csv_column: '',
     literal_value: '',
     label: '',
-    value_map: [], 
+    value_map: [],
+    file_accept: 'any',
+    file_max_mb: 0,
+    file_source: 'server_path',
   });
   renderFlowSteps();
 }
@@ -499,7 +502,7 @@ function renderFlowSteps() {
 }
 
 function renderMappingRow(stepId, m) {
-  const ftypes = ['text','password','email','tel','number','textarea','select','radio','checkbox','click','human_input','split_fill'];
+  const ftypes = ['text','password','email','tel','number','textarea','select','radio','checkbox','click','human_input','split_fill','file_upload'];
   
   let valueMapHtml = '';
   if (m.value_map && m.value_map.length > 0) {
@@ -567,6 +570,43 @@ function renderMappingRow(stepId, m) {
     </div>`;
   }
 
+  // file_upload: show accept type and size limit config
+  let fileUploadHtml = '';
+  if (m.field_type === 'file_upload') {
+    const acceptVal   = m.file_accept  || 'any';
+    const maxMbVal    = m.file_max_mb  != null ? m.file_max_mb : 0;
+    const fileSource  = m.file_source  || 'server_path';
+    fileUploadHtml = `
+    <div style="grid-column:1/-1; padding:.5rem; background: var(--bg); border-radius: var(--radius-sm); margin-bottom:.5rem; border: 1px solid var(--border);">
+      <div style="font-size:.75rem; color:var(--text3); font-weight:600; margin-bottom:.4rem;">File Upload Constraints</div>
+      <div class="row gap-sm" style="flex-wrap:wrap; align-items:center; margin-bottom:.35rem;">
+        <label style="font-size:.8rem; color:var(--text2); white-space:nowrap;">File source:</label>
+        <select class="input" style="width:200px" onchange="updateMapping('${stepId}',${m._id},'file_source',this.value)">
+          <option value="server_path"  ${fileSource==='server_path' ?'selected':''}>Server path (absolute)</option>
+          <option value="local_disk"   ${fileSource==='local_disk'  ?'selected':''}>Local disk (via temp folder)</option>
+          <option value="external_url" ${fileSource==='external_url'?'selected':''}>External URL (S3 / HTTP link)</option>
+        </select>
+      </div>
+      ${fileSource === 'local_disk' ? `<div style="font-size:.75rem; color:var(--text3); margin-bottom:.35rem;">Copy your file to <code>./storage/temp_attachments/</code> on the host, then put the filename (e.g. <code>/app/storage/temp_attachments/photo.jpg</code>) in the CSV. The file is auto-deleted from temp after upload.</div>` : ''}
+      ${fileSource === 'external_url' ? `<div style="font-size:.75rem; color:var(--text3); margin-bottom:.35rem;">CSV column must contain a full HTTP/HTTPS URL (e.g. an S3 presigned URL). The file is downloaded to temp storage, uploaded, then auto-deleted.</div>` : ''}
+      ${fileSource === 'server_path' ? `<div style="font-size:.75rem; color:var(--text3); margin-bottom:.35rem;">CSV column must contain the <b>absolute server path</b> to the file (e.g. <code>/app/storage/uploads/photo.jpg</code>).</div>` : ''}
+      <div class="row gap-sm" style="flex-wrap:wrap; align-items:center; margin-bottom:.35rem;">
+        <label style="font-size:.8rem; color:var(--text2); white-space:nowrap;">Accept type:</label>
+        <select class="input" style="width:160px" onchange="updateMapping('${stepId}',${m._id},'file_accept',this.value)">
+          <option value="any"   ${acceptVal==='any'  ?'selected':''}>Any document</option>
+          <option value="image" ${acceptVal==='image'?'selected':''}>Image only (image/*)</option>
+          <option value="pdf"   ${acceptVal==='pdf'  ?'selected':''}>PDF / Document only</option>
+        </select>
+        <label style="font-size:.8rem; color:var(--text2); white-space:nowrap; margin-left:.5rem;">Max size (MB):</label>
+        <input class="input" type="number" min="0" step="0.1" style="width:90px"
+          placeholder="0 = no limit"
+          value="${maxMbVal}"
+          onchange="updateMapping('${stepId}',${m._id},'file_max_mb',parseFloat(this.value)||0)">
+        <span class="hint" style="font-size:.75rem; color:var(--text3);">0 = no limit; set 2 to enforce &lt;2 MB</span>
+      </div>
+    </div>`;
+  }
+
   return `
     <div class="mapping-row" id="mrow-${m._id}">
       <input class="input" placeholder='[name="field"] or #id'
@@ -590,6 +630,7 @@ function renderMappingRow(stepId, m) {
     </div>` : ''}
     ${humanInputHtml}
     ${splitFillHtml}
+    ${fileUploadHtml}
     ${valueMapHtml}
   `;
 }
@@ -739,6 +780,9 @@ function buildRecipePayload() {
       extracted_value: m.extracted_value,
       human_input_question: m.human_input_question || '',
       split_boxes: m.split_boxes || [],
+      file_accept: m.file_accept || 'any',
+      file_max_mb: m.file_max_mb != null ? m.file_max_mb : 0,
+      file_source: m.file_source || 'server_path',
       value_map: (m.value_map || []).map(v => ({ from_val: v.from_val, to_val: v.to_val }))
     })),
     submit_selector: s.submit_selector || '',
@@ -804,6 +848,9 @@ function loadRecipeIntoFlow(recipe) {
       extracted_value: m.extracted_value || '',
       human_input_question: m.human_input_question || '',
       split_boxes: m.split_boxes || [],
+      file_accept: m.file_accept || 'any',
+      file_max_mb: m.file_max_mb != null ? m.file_max_mb : 0,
+      file_source: m.file_source || 'server_path',
       value_map: m.value_map || [] 
     })),
   }));

@@ -187,6 +187,46 @@ When you only know part of an attribute value, not the full thing.
 
 ---
 
+## 14. File upload fields (`file_upload` field type)
+Used when the target page has an `<input type="file">` element. The selector rules are the same as any other field — pick whichever method from #1–#13 uniquely identifies the file input. The most common patterns:
+
+```html
+<input type="file" name="photo">          →  input[name="photo"]
+<input type="file" id="doc-upload">       →  #doc-upload
+<input type="file">                       →  input[type="file"]
+<input type="file" class="file-picker">   →  input.file-picker
+<input type="file" accept="image/*">      →  input[accept="image/*"]
+```
+
+**How the CSV column value works for file uploads:**
+The CSV column (or literal value) must contain the **absolute path on the server** where RPA Studio is running — not a URL, not a filename alone. The Playwright browser process reads the file directly from disk and sets it on the input element.
+
+| Where your files live | What to put in the CSV column |
+|---|---|
+| On the **same machine** running RPA Studio (bare metal / local Docker) | Absolute local path: `/home/user/docs/photo.jpg` or `C:\Users\user\docs\photo.jpg` |
+| Inside the **Docker container** | Path inside the container: `/app/storage/uploads/photo.jpg` |
+| On a **network share / NFS** mounted into the container | Mount the share as a volume in `docker-compose.yml`, then use the mount path: `/mnt/nas/docs/photo.jpg` |
+| On **S3 or any remote storage** | S3 files **cannot be used directly** — S3 is not a filesystem Playwright can read. You must download the file to the server first (see note below). |
+
+**S3 workflow** — since Playwright cannot read S3 URLs directly, the recommended pattern is:
+1. Before the RPA run, download each file from S3 to a local folder on the server (e.g. `/app/storage/uploads/`).
+2. Put the resulting local path in the CSV column for that row.
+3. Optionally delete the local copy after the run completes.
+
+You can automate the download step with a simple script that runs before you start the RPA job, or upload the files via the RPA Studio **Uploads** tab (they land at `/app/storage/uploads/{filename}` inside the container).
+
+**Three accept-type modes (set in Flow Builder, not in the CSV):**
+
+| Mode | What it allows | Typical selector |
+|---|---|---|
+| `Any document` (default) | Any file type, no MIME check | `input[type="file"]` |
+| `Image only` | Files whose MIME starts with `image/` — `.jpg`, `.png`, `.gif`, `.webp`, `.svg`, etc. | `input[name="photo"]` |
+| `PDF / Document only` | `.pdf`, `.doc`, `.docx`, `.xls`, `.xlsx`, `.ppt`, `.pptx`, `.txt`, `.rtf` | `input[name="id_proof"]` |
+
+**Size limit** — set **Max size (MB)** to `2` in the Flow Builder constraints panel to enforce a strict `< 2 MB` limit. Set to `0` (default) for no limit. The check happens before the file is set on the element — if the file is too large the row fails immediately with a clear log message.
+
+---
+
 ## Priority Order
 
 When you're looking at a field and deciding which selector to use, go down this list and stop at the first one that applies:

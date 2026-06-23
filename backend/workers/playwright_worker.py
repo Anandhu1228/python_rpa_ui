@@ -12,6 +12,9 @@ from typing import Any, Dict, List, Optional
 
 from backend.workers.job_store import job_store
 
+TEMP_ATTACHMENTS_DIR = Path(__file__).parent.parent.parent / "storage" / "temp_attachments"
+TEMP_ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
+
 try:
     import openpyxl
     HAS_OPENPYXL = True
@@ -202,6 +205,139 @@ def fill_field(page, field_cfg: Dict, row: Dict[str, str], delay: Dict, job_id: 
             except Exception as e:
                 if job_id:
                     log(job_id, f"    ⚠ split_fill box '{box_sel}': {e}")
+        return
+
+    # ── file_upload ──
+    # Uploads a file to an <input type="file"> element.
+    # The CSV column (or literal value) must contain the absolute path of the
+    # file on the server filesystem.
+    # Three optional constraints are read from the mapping config:
+    #   file_accept  : "image"  → only image/* MIME types
+    #                  "pdf"    → only application/pdf and common doc types
+    #                  "any"    → no MIME restriction (default)
+    #   file_max_mb  : maximum allowed file size in MB (0 = no limit)
+    # If a constraint is violated the field raises FieldError (row fails).
+    if field_type == "file_upload":
+        import mimetypes
+        file_path = value.strip()
+        if not file_path:
+            if job_id:
+                log(job_id, f"    ⚠ file_upload: no file path in CSV/literal for selector '{selector}' — skipping")
+            return
+
+        file_source = field_cfg.get("file_source", "server_path")
+        _temp_file_to_cleanup = None  # track any temp file we create, so we can delete it after upload
+
+        if file_source == "local_disk":
+            # file_path is a path on the operator's local machine.
+            # We cannot read the local disk from inside Docker — the user must have
+            # placed the file under ./storage/temp_attachments/ (host) which maps to
+            # /app/storage/temp_attachments/ (container).  We copy it into the same
+            # temp folder under a job-scoped name so concurrent runs don't collide,
+            # then delete the copy after set_input_files() completes.
+            import shutil
+            src = Path(file_path)
+            if not src.exists():
+                raise FieldError(
+                    f"file_upload (local_disk): file not found in temp_attachments: {file_path}. "
+                    f"Copy the file to ./storage/temp_attachments/ on the host first."
+                )
+            dest = TEMP_ATTACHMENTS_DIR / f"{job_id}_{src.name}"
+            shutil.copy2(str(src), str(dest))
+            _temp_file_to_cleanup = dest
+            p_file = dest
+            if job_id:
+                log(job_id, f"    → [file_upload] local_disk: copied '{src.name}' to temp_attachments for upload")
+
+        elif file_source == "external_url":
+            # file_path is an HTTP/HTTPS URL (e.g. an S3 presigned URL or any public link).
+            # Download it into temp_attachments/ under a job-scoped name, upload, then delete.
+            import urllib.request
+            import urllib.parse
+            url_str = file_path
+            parsed = urllib.parse.urlparse(url_str)
+            url_filename = Path(parsed.path).name or "attachment"
+            dest = TEMP_ATTACHMENTS_DIR / f"{job_id}_{url_filename}"
+            if job_id:
+                log(job_id, f"    → [file_upload] external_url: downloading '{url_filename}' to temp_attachments...")
+            try:
+                urllib.request.urlretrieve(url_str, str(dest))
+            except Exception as dl_err:
+                raise FieldError(f"file_upload (external_url): download failed for '{url_str}': {dl_err}")
+            _temp_file_to_cleanup = dest
+            p_file = dest
+            if job_id:
+                log(job_id, f"    ✓ [file_upload] external_url: downloaded '{url_filename}'")
+
+        else:
+            # "server_path" (default) — value is already an absolute path on the server filesystem
+            p_file = Path(file_path)
+
+        if not p_file.exists():
+            raise FieldError(f"file_upload: file not found: {file_path}")
+
+        # ── size check ──
+        file_max_mb = float(field_cfg.get("file_max_mb", 0) or 0)
+        if file_max_mb > 0:
+            size_mb = p_file.stat().st_size / (1024 * 1024)
+            if size_mb > file_max_mb:
+                raise FieldError(
+                    f"file_upload: file '{p_file.name}' is {size_mb:.2f} MB, "
+                    f"exceeds limit of {file_max_mb} MB"
+                )
+
+        # ── MIME / accept check ──
+        file_accept = field_cfg.get("file_accept", "any")
+        mime_type, _ = mimetypes.guess_type(str(p_file))
+        mime_type = mime_type or "application/octet-stream"
+
+        if file_accept == "image":
+            if not mime_type.startswith("image/"):
+                raise FieldError(
+                    f"file_upload: file '{p_file.name}' (MIME: {mime_type}) is not an image — "
+                    f"only image/* files are accepted for this field"
+                )
+        elif file_accept == "pdf":
+            # Accept PDF and common document types
+            _PDF_DOC_MIMES = {
+                "application/pdf",
+                "application/msword",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/vnd.ms-excel",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-powerpoint",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "text/plain",
+                "application/rtf",
+            }
+            if mime_type not in _PDF_DOC_MIMES:
+                raise FieldError(
+                    f"file_upload: file '{p_file.name}' (MIME: {mime_type}) is not an accepted "
+                    f"PDF/document type for this field"
+                )
+        # "any" → no MIME restriction
+
+        if job_id:
+            log(job_id, f"    → [file_upload] Uploading '{p_file.name}' ({mime_type}) to '{selector}'...")
+            ulog(job_id, "file_upload", selector=selector, filename=p_file.name, mime=mime_type)
+
+        try:
+            frame, el = resolve_frame(page, selector, action_to)
+            el.wait_for(state="attached", timeout=action_to)
+            el.set_input_files(str(p_file), timeout=action_to)
+            if job_id:
+                log(job_id, f"    ✓ [file_upload] '{p_file.name}' set successfully.")
+        except Exception as e:
+            raise FieldError(f"file_upload: could not set file on '{selector}': {e}")
+        finally:
+            # Clean up any temp file we created (local_disk copy or external_url download)
+            if _temp_file_to_cleanup and _temp_file_to_cleanup.exists():
+                try:
+                    _temp_file_to_cleanup.unlink()
+                    if job_id:
+                        log(job_id, f"    → [file_upload] temp file '{_temp_file_to_cleanup.name}' removed.")
+                except Exception:
+                    pass
         return
 
     if not value and field_type not in ("checkbox", "click"):

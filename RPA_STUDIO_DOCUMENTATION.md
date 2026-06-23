@@ -53,7 +53,8 @@ python_rpa_ui/
     ├── recipes/               one {recipe_id}.json per saved flow
     ├── uploads/                uploaded CSV/Excel, named {job_id}.csv|.xlsx
     ├── logs/                   {job_id}.log + {job_id}_meta.json per run
-    └── recordings/             {job_id}.webm (+ {job_id}_tab2.webm, _tab3.webm, …)
+    ├── recordings/             {job_id}.webm (+ {job_id}_tab2.webm, _tab3.webm, …)
+    └── temp_attachments/       transient files used by file_upload (local_disk / external_url); auto-deleted after upload
 ```
 
 The `docker-compose.yml` mounts `./storage:/app/storage` (so all of the above persists across container restarts) and `./frontend:/app/frontend:ro` (so editing frontend files doesn't require a rebuild). It exposes port **10090**.
@@ -182,7 +183,7 @@ Executed by `execute_login_steps()`: navigate → fill each field via `fill_fiel
 
 A field mapping object (used in `field_mappings`) has a `field_type` and a `source`.
 
-**`field_type` values** (from `fill_field()` in `playwright_worker.py` — the README only lists 8 of these; the actual list is 12):
+**`field_type` values** (from `fill_field()` in `playwright_worker.py` — the README only lists 8 of these; the actual list is 13):
 
 | field_type | Behavior |
 |---|---|
@@ -193,6 +194,7 @@ A field mapping object (used in `field_mappings`) has a `field_type` and a `sour
 | `click` | Just clicks the selector — no value used at all |
 | `human_input` | **Pauses the run** (see §9) |
 | `split_fill` | Splits one resolved value across multiple input boxes (see §10) |
+| `file_upload` | Uploads a file to an `<input type="file">` element (see §21) |
 
 **`source` values** (`resolve_value()` in `playwright_worker.py`):
 
@@ -405,6 +407,46 @@ Previously, `split_fill` mappings only accepted a CSV column as their value sour
 
 **`backend/workers/playwright_worker.py`:** The `split_fill` branch in `fill_field()` was extended: instead of unconditionally calling `resolve_value()`, it first checks `field_cfg.get("source")`. If the source is `"human_input"`, it runs the same pause-poll-respond loop as `field_type: "human_input"` (5-minute timeout, `set_pending_action` / `get_action_response` / `clear_action`, raises `FieldError` on timeout), then uses the operator's response as the `source_value` to split across the boxes. For any other source it falls through to `resolve_value()` as before.
 
+### E. Added `file_upload` field type for attaching files to web forms
+**Files:** `frontend/js/flow.js`, `backend/workers/playwright_worker.py`
+A new `file_upload` field type was added to handle `<input type="file">` elements on target web pages — covering image-only, PDF/document-only, any-file, and size-limited scenarios.
+
+**`backend/workers/playwright_worker.py`:** A new `# ── file_upload ──` branch was added inside `fill_field()`, immediately after the `split_fill` block. The branch:
+1. Resolves the file path from the CSV column or literal value (same `resolve_value()` as every other type).
+2. Checks the file exists on disk — raises `FieldError` if not.
+3. Checks file size against `file_max_mb` if set to a value greater than `0` — raises `FieldError` if exceeded.
+4. Checks MIME type against `file_accept`: `"image"` requires `image/*`; `"pdf"` requires a set of PDF/Office/text MIME types; `"any"` (default) skips the check entirely — raises `FieldError` on mismatch.
+5. Calls `el.set_input_files(path)` via Playwright's `resolve_frame` helper (so it works inside iframes too).
+Violations raise `FieldError`, which marks the row as failed with a descriptive log message and continues to the next row — same behaviour as any other field failure.
+
+**`frontend/js/flow.js`:** Four additions only, no existing code altered:
+- `file_upload` appended to the `ftypes` dropdown array in `renderMappingRow()`.
+- A **"File Upload Constraints"** config panel rendered when `field_type === 'file_upload'`: an Accept type dropdown (`Any document` / `Image only (image/*)` / `PDF / Document only`) and a Max size (MB) number input (0 = no limit).
+- `file_accept: 'any'` and `file_max_mb: 0` added to the default object created by `addMapping()`.
+- Both fields included in `buildRecipePayload()` and `loadRecipeIntoFlow()` so they round-trip correctly through save / load / JSON export / JSON import.
+
+See §21 for full usage reference.
+
+### F. Added `file_source` to `file_upload` fields — local disk and external URL support
+**Files:** `frontend/js/flow.js`, `backend/workers/playwright_worker.py`, `RPA_STUDIO_DOCUMENTATION.md`
+A new `file_source` field was added to `file_upload` mappings, with three options: `server_path` (existing behaviour, default), `local_disk`, and `external_url`.
+
+**`backend/workers/playwright_worker.py`:**
+- A module-level `TEMP_ATTACHMENTS_DIR` constant (`storage/temp_attachments/`) is created on import with `mkdir(parents=True, exist_ok=True)`.
+- Inside the `# ── file_upload ──` branch of `fill_field()`, before the file-exists check, a `file_source` dispatch block was added:
+  - `local_disk` — expects the file has been placed under `./storage/temp_attachments/` on the host (which maps to `/app/storage/temp_attachments/` inside Docker). Copies it to a job-scoped name in that same directory (to prevent concurrent-run collisions), then cleans up the copy in a `finally` block after `set_input_files()` completes.
+  - `external_url` — treats the CSV value as an HTTP/HTTPS URL. Downloads it with `urllib.request.urlretrieve` into `temp_attachments/` under a job-scoped name, then cleans up in the same `finally` block.
+  - `server_path` (default) — existing behaviour; no copy/download, no cleanup.
+- A `_temp_file_to_cleanup` variable tracks the temp path (if any) and the `finally` block deletes it unconditionally whether the upload succeeded or raised.
+
+**`frontend/js/flow.js`:** Four additions only, no existing code altered:
+- `file_source: 'server_path'` added to the default object created by `addMapping()`.
+- A **"File source"** dropdown added at the top of the "File Upload Constraints" panel (rendered when `field_type === 'file_upload'`): options are `Server path (absolute)` / `Local disk (via temp folder)` / `External URL (S3 / HTTP link)`. A contextual hint line below the dropdown changes based on the selected source to guide the user.
+- `file_source` included in `buildRecipePayload()` so it is saved into the recipe JSON.
+- `file_source` included in `loadRecipeIntoFlow()` so it round-trips correctly through save / load / JSON export / JSON import.
+
+See §21 for full usage reference.
+
 ---
 
 ## 20. Appendix — minimal complete recipe example
@@ -450,9 +492,102 @@ Previously, `split_fill` mappings only accepted a CSV column as their value sour
           "source": "literal",
           "literal_value": "yes",
           "value_map": []
+        },
+        {
+          "selector": "input[name=\"photo\"]",
+          "field_type": "file_upload",
+          "source": "csv_column",
+          "csv_column": "PhotoPath",
+          "literal_value": "",
+          "file_accept": "image",
+          "file_max_mb": 2,
+          "value_map": []
         }
       ]
     }
   ]
 }
 ```
+
+---
+
+## 21. File upload fields (`field_type: "file_upload"`)
+
+Added in the same pass as this documentation update. Handles `<input type="file">` elements on target web pages — the three attachment scenarios and the strict size limit are all controlled per mapping, not per recipe.
+
+### How it works at run time (`playwright_worker.py` → `fill_field()`)
+
+1. The CSV column (or literal value) is resolved to a file path string via the normal `resolve_value()` call.
+2. If the path is empty the field is silently skipped (logs a warning, does not fail the row).
+3. If the file does not exist on disk → `FieldError` → row fails.
+4. **Size check** (`file_max_mb`): if greater than `0`, the file's size in MB is compared. Exceeding the limit → `FieldError` → row fails.
+5. **MIME check** (`file_accept`):
+   - `"image"` — MIME must start with `image/` (covers `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.svg`, `.bmp`, `.tiff`, etc.). Anything else → `FieldError`.
+   - `"pdf"` — MIME must be one of: `application/pdf`, `application/msword`, `application/vnd.openxmlformats-officedocument.wordprocessingml.document` (`.docx`), `application/vnd.ms-excel`, `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` (`.xlsx`), `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-officedocument.presentationml.presentation` (`.pptx`), `text/plain`, `application/rtf`. Anything else → `FieldError`.
+   - `"any"` (default) — no MIME check, any file is accepted.
+6. `resolve_frame(page, selector)` is called (same helper used by every other field type) so the upload works even if the `<input type="file">` sits inside an iframe.
+7. `el.set_input_files(path)` sets the file on the element. Playwright handles the OS file-picker bypass internally — no dialog appears in headless mode.
+
+### Field mapping JSON shape
+
+```jsonc
+{
+  "selector": "input[name=\"photo\"]",   // CSS selector for the <input type="file">
+  "field_type": "file_upload",
+  "source": "csv_column",               // or "literal"
+  "csv_column": "PhotoPath",            // header name in the CSV/Excel file
+  "literal_value": "",                  // used instead of csv_column when source = "literal"
+  "file_source": "server_path",         // "server_path" | "local_disk" | "external_url"
+  "file_accept": "image",              // "image" | "pdf" | "any"
+  "file_max_mb": 2,                    // 0 = no limit; 2 = strict < 2 MB
+  "value_map": []                       // not useful for file paths, keep empty
+}
+```
+
+### What goes in the CSV column (depends on `file_source`)
+
+`file_source` controls how the worker interprets the CSV value:
+
+| `file_source` | What the CSV column must contain | When to use |
+|---|---|---|
+| `server_path` (default) | Absolute path on the server/container filesystem, e.g. `/app/storage/uploads/john.jpg` | File is already on the server (e.g. uploaded via the Uploads tab) |
+| `local_disk` | Absolute container path inside `temp_attachments/`, e.g. `/app/storage/temp_attachments/john.jpg` | File lives on the operator's machine; they copy it to `./storage/temp_attachments/` on the host first |
+| `external_url` | Full HTTP/HTTPS URL, e.g. `https://s3.amazonaws.com/bucket/john.jpg` or an S3 presigned URL | File is on S3 or any public/presigned HTTP endpoint |
+
+### `local_disk` workflow (Docker)
+
+Because the Docker container cannot see the operator's local filesystem, the file must be copied into the shared volume first:
+
+1. Copy the file into `./storage/temp_attachments/` on the host machine (this folder maps to `/app/storage/temp_attachments/` inside the container). The folder is created automatically on first run.
+2. In the CSV, put the container path: `/app/storage/temp_attachments/john.jpg`
+3. Set `file_source` to `local_disk` in the Flow Builder.
+4. Run the job — the worker copies the file to a job-scoped temp name, calls `set_input_files()`, then **auto-deletes the copy** after the upload completes (success or failure).
+
+> The original file in `temp_attachments/` is **not** deleted — only the job-scoped copy is removed. If you want to clean up the originals, delete them from the Uploads tab or manually from the host folder.
+
+### `external_url` workflow (S3 / remote links)
+
+1. In the CSV, put the full URL of the file: `https://s3.amazonaws.com/your-bucket/john.jpg` (or an S3 presigned URL, or any direct HTTP link).
+2. Set `file_source` to `external_url` in the Flow Builder.
+3. Run the job — for each row the worker downloads the file to `storage/temp_attachments/` under a job-scoped name, calls `set_input_files()`, then **auto-deletes the downloaded file** immediately after.
+
+> Private S3 files must use presigned URLs (which are time-limited). Public S3 URLs or CloudFront URLs work directly.
+
+### `server_path` workflow (existing behaviour)
+
+| Deployment | Example CSV value |
+|---|---|
+| Local machine (no Docker) | `/home/user/files/john_photo.jpg` or `C:\Users\user\files\john_photo.jpg` |
+| Docker container | `/app/storage/uploads/john_photo.jpg` |
+| Network share mounted into container | `/mnt/nas/docs/john_id.pdf` |
+
+Use the RPA Studio **Uploads tab** to drag-and-drop files — they land at `/app/storage/uploads/{filename}` inside the container, which is the path to put in the CSV.
+
+### Flow Builder UI
+
+When `file_upload` is selected as the field type in a mapping row, a **"File Upload Constraints"** panel appears below the row showing:
+- **File source** dropdown: `Server path (absolute)` / `Local disk (via temp folder)` / `External URL (S3 / HTTP link)` — a contextual hint line below the dropdown explains what the CSV column must contain for the selected source.
+- **Accept type** dropdown: `Any document` / `Image only (image/*)` / `PDF / Document only`
+- **Max size (MB)** number input: `0` = no limit; set `2` to enforce strictly less than 2 MB
+
+These values are saved into the recipe JSON as `file_source`, `file_accept` and `file_max_mb` on the mapping object and round-trip correctly through Download JSON / Upload JSON.
