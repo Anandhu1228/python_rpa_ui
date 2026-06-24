@@ -484,6 +484,14 @@ The `<video>` element previously set `src` directly to `/api/run/{job_id}/video?
 
 ---
 
+## 21. Hidden behaviors, easter eggs, and conflict notes
+
+All detailed behavioral notes — including jitter on delays, select label fallback, checkbox truthy values, radio auto-selector, human_input with blank selector, split_fill short-value handling, Google Drive URL rewriting for file_upload, temp file cleanup, wait_for_url glob semantics, automatic error scraping on URL mismatch, row recovery navigation, stop-at-row-boundary, and iframe auto-search — are documented in `selector_documentation.md` under **§16 (pseudo-class selectors)** and **§17 (hidden behaviors and easter eggs)**.
+
+The conflict between comma-separated `error_selector` (logical OR, supported) and comma in `error_text_contains` (treated as a literal string, NOT split) is documented in `selector_documentation.md` **§15**. Key rule: use commas freely in `error_selector`; never use commas as OR separators in `error_text_contains`.
+
+---
+
 ## 20. Appendix — minimal complete recipe example
 
 ```json
@@ -688,3 +696,7 @@ Each step's editor now has an **Error Handling** collapsible section (always vis
 - **Dialog action** dropdown (`accept / dismiss`) — shown when the checkbox is ticked.
 
 All new fields default to their safe no-op values (`error_selector: ""`, `on_error: "fail"`, `dismiss_dialogs: false`) so existing recipes continue to behave identically without any changes.
+
+
+
+look selector_documentation for the usage of field selectors

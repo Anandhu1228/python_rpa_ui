@@ -544,66 +544,66 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
                 except FieldError as e:
                     log(job_id, f"    ⚠ {e}")
 
-            # CAPTCHA / Human Handoff
-            cap_img_sel = step.get("captcha_image_selector", "")
-            cap_inp_sel = step.get("captcha_input_selector", "")
-            if cap_img_sel and cap_inp_sel:
-                log(job_id, f"    → [Human Handoff] Waiting for image/canvas '{cap_img_sel}'...")
+        # CAPTCHA / Human Handoff — runs on every attempt so user always sees the latest image
+        cap_img_sel = step.get("captcha_image_selector", "")
+        cap_inp_sel = step.get("captcha_input_selector", "")
+        if cap_img_sel and cap_inp_sel:
+            log(job_id, f"    → [Human Handoff] Waiting for image/canvas '{cap_img_sel}'...")
+            try:
+                import base64
+                # Try main page then iframes
+                frame_obj = page
                 try:
-                    import base64
-                    # Try main page then iframes
-                    frame_obj = page
-                    try:
-                        el_check = page.locator(cap_img_sel).first
-                        el_check.wait_for(state="visible", timeout=action_to)
-                    except Exception:
-                        for fr in page.frames:
-                            if fr == page.main_frame:
-                                continue
-                            try:
-                                el_check = fr.locator(cap_img_sel).first
-                                el_check.wait_for(state="visible", timeout=2000)
-                                frame_obj = fr
-                                break
-                            except Exception:
-                                continue
-
-                    el = frame_obj.locator(cap_img_sel).first
-                    el.wait_for(state="visible", timeout=action_to)
-                    img_bytes = el.screenshot(timeout=action_to)
-                    b64 = base64.b64encode(img_bytes).decode('utf-8')
-
-                    log(job_id, "    → [Human Handoff] Action required: Waiting for user to solve CAPTCHA via Chat...")
-                    ulog(job_id, "captcha", image_b64=b64)
-                    job_store.set_pending_action(job_id, {"type": "captcha", "image_b64": b64})
-
-                    waited = 0
-                    resp = None
-                    while waited < 300:
-                        resp = job_store.get_action_response(job_id)
-                        if resp:
+                    el_check = page.locator(cap_img_sel).first
+                    el_check.wait_for(state="visible", timeout=action_to)
+                except Exception:
+                    for fr in page.frames:
+                        if fr == page.main_frame:
+                            continue
+                        try:
+                            el_check = fr.locator(cap_img_sel).first
+                            el_check.wait_for(state="visible", timeout=2000)
+                            frame_obj = fr
                             break
-                        time.sleep(1)
-                        waited += 1
+                        except Exception:
+                            continue
 
-                    job_store.clear_action(job_id)
+                el = frame_obj.locator(cap_img_sel).first
+                el.wait_for(state="visible", timeout=action_to)
+                img_bytes = el.screenshot(timeout=action_to)
+                b64 = base64.b64encode(img_bytes).decode('utf-8')
 
-                    if not resp:
-                        log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
-                        ulog(job_id, "captcha_timeout")
-                        return False, page
+                log(job_id, "    → [Human Handoff] Action required: Waiting for user to solve CAPTCHA via Chat...")
+                ulog(job_id, "captcha", image_b64=b64)
+                job_store.set_pending_action(job_id, {"type": "captcha", "image_b64": b64})
 
-                    log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
-                    ulog(job_id, "captcha_answer", answer=resp)
+                waited = 0
+                resp = None
+                while waited < 300:
+                    resp = job_store.get_action_response(job_id)
+                    if resp:
+                        break
+                    time.sleep(1)
+                    waited += 1
 
-                    inp_frame, inp_el = resolve_frame(page, cap_inp_sel, action_to)
-                    inp_el.wait_for(state="visible", timeout=action_to)
-                    inp_el.fill(resp, timeout=action_to)
-                    human_delay(delay.get("between_fields_ms", 100))
+                job_store.clear_action(job_id)
 
-                except Exception as e:
-                    log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
-                    job_store.clear_action(job_id)
+                if not resp:
+                    log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
+                    ulog(job_id, "captcha_timeout")
+                    return False, page
+
+                log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
+                ulog(job_id, "captcha_answer", answer=resp)
+
+                inp_frame, inp_el = resolve_frame(page, cap_inp_sel, action_to)
+                inp_el.wait_for(state="visible", timeout=action_to)
+                inp_el.fill(resp, timeout=action_to)
+                human_delay(delay.get("between_fields_ms", 100))
+
+            except Exception as e:
+                log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
+                job_store.clear_action(job_id)
 
         # Dialog handling — register before submit click
         _dialog_log = []
@@ -686,9 +686,10 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
                     log(job_id, f"    ✗ [{label}] Max retries ({max_retries}) reached — failing row.")
                     ulog(job_id, "retry_exhausted", label=label, max_retries=max_retries)
                 return False, page
+            has_captcha = bool(step.get("captcha_image_selector", "") and step.get("captcha_input_selector", ""))
             if on_error == "retry":
-                if not human_input_mappings:
-                    log(job_id, f"    ✗ [{label}] on_error=retry but no human_input fields to re-ask — failing row.")
+                if not human_input_mappings and not has_captcha:
+                    log(job_id, f"    ✗ [{label}] on_error=retry but no human_input fields or captcha to re-ask — failing row.")
                     return False, page
                 continue
             if on_error == "ask":
@@ -707,9 +708,9 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
                 if not op_resp or op_resp.strip().lower() == "fail":
                     log(job_id, f"    ✗ [{label}] Operator chose to fail row.")
                     return False, page
-                if human_input_mappings:
+                if human_input_mappings or has_captcha:
                     continue
-                log(job_id, f"    ✗ [{label}] Operator chose retry but no human_input fields to re-ask — failing row.")
+                log(job_id, f"    ✗ [{label}] Operator chose retry but no human_input fields or captcha to re-ask — failing row.")
                 return False, page
 
         # Wait for URL
