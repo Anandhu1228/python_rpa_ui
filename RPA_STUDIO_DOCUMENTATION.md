@@ -153,7 +153,7 @@ This is the Pydantic model in `recipe_router.py` — the exact shape saved to `s
   "captcha_input_selector": "string (optional — see §11)",
   "submit_selector": "string (optional)",
   "wait_for_url": "string (optional — substring match against the post-submit URL)",
-  "wait_for_selector": "string (optional — waited for, but a miss only logs a warning, not a failure)",
+  "wait_for_selector": "string (optional — if set, the step is considered failed if this selector is not found within page_load_timeout_ms; use this as a success indicator, e.g. an element that only appears on the happy path)",
   "skip_if_no_data": false,
   "opens_new_tab": false
 }
@@ -299,6 +299,7 @@ Disk-backed, in-memory-cached. Per job:
 - `storage/logs/{job_id}_meta.json` — `{job_id, recipe_name, status, summary, created_at}`.
 - On process start, `_load_all_meta()` rehydrates every job (including its full log file into memory) from these files — so run history survives a restart.
 - `status` lifecycle: `pending → running → done | error`.
+- `stop_requested` — boolean flag set by `POST /api/run/{job_id}/stop`. The worker checks this at the start of each new row; when true it breaks out of the row loop cleanly (finishes the current row fully, saves video, closes the browser) and sets `status = "done"`.
 - `pending_action` / `action_response` — the mechanism behind `human_input` and `captcha` (see §9, §11); `clear_action()` resets both after a response is consumed.
 
 ---
@@ -309,7 +310,7 @@ Disk-backed, in-memory-cached. Per job:
 2. Slice to `[start_row-1 : end_row]`.
 3. Launch headless Chromium, create a context with `record_video_dir` and a `1280x800` viewport.
 4. Run recipe-level `login_steps` once (if any) — a failure here aborts the whole job (`status = "error"`) before any rows run.
-5. For each row: run every flow step in order via `execute_step()`. On any step failure, the row is marked failed and the worker tries to recover by navigating back to `base_url` before continuing to the next row (best-effort, swallows its own exceptions).
+5. For each row: first checks `stop_requested` — if set, breaks the row loop cleanly (current row is not started). Otherwise runs every flow step in order via `execute_step()`. On any step failure, the row is marked failed and the worker tries to recover by navigating back to `base_url` before continuing to the next row (best-effort, swallows its own exceptions).
 6. `between_records_ms`, `between_fields_ms`, `between_steps_ms` delays all apply `human_delay()` — sleep for the configured ms ±20% random jitter (minimum 10ms), meant to look less robotic.
 7. At the end: save every tracked page's video (§13), close context/browser, write the final summary (`{success, failed, failed_ids}`) and set status to `done`.
 8. Any uncaught exception anywhere sets `status = "error"` and logs a full traceback into the run's log.
@@ -343,6 +344,7 @@ All paths below are mounted with the `/api` prefix from `main.py`; everything ex
 | PUT | `/api/recipes/{id}` | recipe_router.py | Replace a recipe |
 | DELETE | `/api/recipes/{id}` | recipe_router.py | Delete a recipe |
 | POST | `/api/run` | run_router.py | multipart form: `recipe_id, file, start_row, end_row?` → starts a background run, returns `{job_id}` |
+| POST | `/api/run/{job_id}/stop` | run_router.py | Signal a running job to stop after its current row; sets `stop_requested = True`; job finishes cleanly and video is saved |
 | POST | `/api/run/{job_id}/action` | run_router.py | `{response}` — answers a pending human_input/captcha request |
 | GET | `/api/run` | run_router.py | List all jobs (newest first) |
 | GET | `/api/run/{job_id}` | run_router.py | Status + summary + log count for one job |
@@ -374,7 +376,7 @@ The handler polls job state every 150ms and uses guarded send/close helpers (`_s
 | **Flow Builder** | `flow.js` | Build/edit a recipe: name/base URL/description, timing config, recipe-level login steps, and an ordered list of flow steps with field mappings. Has Save / Download JSON / **Upload JSON** (new) / Clear |
 | **Flows** | `recipes.js` | List saved recipes; Edit / Run / Download JSON / Delete each |
 | **Run** | `runner.js` | Pick a recipe, drop a CSV/XLSX (client-side preview via SheetJS for `.xlsx`), optional row range, start the run |
-| **Logs** | `runner.js` | Run history grouped by recipe name → list of past runs → live or historical log terminal, progress bar, human-input/captcha action card, video playback (multi-tab), download/delete log |
+| **Logs** | `runner.js` | Run history grouped by recipe name → list of past runs → live or historical log terminal, progress bar, human-input/captcha action card, video playback (multi-tab), download/delete log. A **Stop Run** button appears in the header during an active run; clicking it calls `POST /api/run/{job_id}/stop` and hides itself once the run ends. Video playback fetches the `.webm` as a blob URL so seeking/scrubbing works correctly in-browser (not only after download). |
 | **Uploads** | `runner.js` | Manage previously-uploaded data files; shows linked job status/recipe name |
 
 Theme toggle (dark/light) is stored in `localStorage['theme']` and applied via `document.documentElement.dataset.theme`. The active tab is also persisted, in `sessionStorage['activeTab']`, so a refresh returns you to where you were.
@@ -461,6 +463,18 @@ Previously, file upload activity was only visible in the Developer log view. Fou
 - `file_downloaded` → "✓ Downloaded: **filename**"
 - `file_upload` → "📎 Attaching **filename** (mime)"
 - `file_attached` → "✓ Attached: **filename**"
+
+### H. `wait_for_selector` now fails the step; Stop Run button; video seeking fixed
+**Files:** `backend/workers/playwright_worker.py`, `backend/workers/job_store.py`, `backend/routers/run_router.py`, `frontend/js/api.js`, `frontend/js/runner.js`, `frontend/index.html`
+
+**`wait_for_selector` is now a hard gate, not a warning.**
+Previously, if the selector configured in a step's "Wait for selector" field was not found after submit, the worker logged a `⚠ warning` and continued to the next step anyway. The step was not marked as failed. This meant it was useless as a success indicator — for example, putting the first element of a next-page form as the wait selector had no effect if the previous step's submit was rejected and the page never changed. One line changed in `execute_step()`: the `⚠ log` was replaced with a `✗ log` followed by `return False, page`, making a missed `wait_for_selector` behave identically to a missed `wait_for_url`.
+
+**Graceful Stop Run.**
+Three backend additions: a `stop_requested: bool = False` field on the `Job` dataclass in `job_store.py`; `request_stop()` and `is_stop_requested()` methods on `JobStore`; and a new `POST /api/run/{job_id}/stop` endpoint in `run_router.py`. In `playwright_worker.py`, the row loop checks `is_stop_requested()` at the top of each iteration (before fields are filled or steps executed), breaks when true, then falls through to the normal end-of-run path — video save, browser close, summary write, `status = "done"`. The recording is never corrupted. On the frontend: `API.stopRun()` added to `api.js`; `stopCurrentRun()` added to `runner.js` (with a confirm dialog explaining the clean-stop behavior); a `btn-stop-run` button added to `index.html` in the Logs tab terminal header (starts hidden; shown by `startLogStream()`, hidden by `onRunDone()`).
+
+**Video seeking fixed.**
+The `<video>` element previously set `src` directly to `/api/run/{job_id}/video?tab=N&token=...`. Chrome/Firefox require HTTP range request support to allow scrubbing `.webm` files — the FastAPI `FileResponse` does support ranges, but the browser's built-in video element sends range requests with the token in the URL query string, which does not always get forwarded correctly through the auth middleware for every range sub-request. Result: the video played from the beginning but the scrubber/seek was frozen. Fixed by fetching the entire `.webm` once via `fetch()` (which sends the token as a header through `api.js`'s `_fetch` wrapper), converting the response to a `Blob`, creating a `blob:` URL, and setting that as the `src`. A blob URL is served from memory so all byte ranges are available immediately and seeking works without any server round-trips. The blob URL is revoked in `closeVideoModal()` to avoid memory leaks.
 
 ---
 

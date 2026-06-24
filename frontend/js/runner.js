@@ -158,6 +158,18 @@ async function startRun() {
   }
 }
 
+async function stopCurrentRun() {
+  if (!currentJobId) return;
+  if (!confirm('Stop the current run? The browser will finish the current row cleanly and save the video.')) return;
+  try {
+    await API.stopRun(currentJobId);
+    appendDevLog('🛑 Stop requested — run will halt after current row.', 'log-warn');
+    appendUserEvent({ _t: 'info', msg: '🛑 Stop requested — finishing current row…' });
+  } catch(e) {
+    alert('Failed to stop run: ' + e.message);
+  }
+}
+
 // ── Human Action / Chat Handoff ─────────────────────────────
 
 function handleRunAction(action) {
@@ -377,6 +389,9 @@ function startLogStream(jobId) {
   document.getElementById('progress-label').textContent = 'Running…';
   document.getElementById('interactive-action-card').classList.add('hidden');
 
+  const stopBtn = document.getElementById('btn-stop-run');
+  if (stopBtn) stopBtn.classList.remove('hidden');
+
   currentWS = API.openLogSocket(
     jobId,
     logBuffer.length,
@@ -439,6 +454,8 @@ function updateProgressFromLine(line) {
 function onRunDone(status, summary) {
   const label = document.getElementById('progress-label');
   document.getElementById('interactive-action-card').classList.add('hidden');
+  const stopBtn = document.getElementById('btn-stop-run');
+  if (stopBtn) stopBtn.classList.add('hidden');
   if (status === 'done') {
     label.textContent = 'Run complete';
     document.getElementById('progress-bar').style.width = '100%';
@@ -697,7 +714,20 @@ async function playVideo(jobId, tab) {
     }
   }
   const player = document.getElementById('run-video-player');
-  player.src = `/api/run/${jobId}/video?tab=${tab}&token=${token}`;
+  player.pause();
+  player.src = '';
+  const videoUrl = `/api/run/${jobId}/video?tab=${tab}&token=${token}`;
+  try {
+    const resp = await fetch(videoUrl);
+    if (!resp.ok) throw new Error('Video not found');
+    const blob = await resp.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    if (player._blobUrl) URL.revokeObjectURL(player._blobUrl);
+    player._blobUrl = blobUrl;
+    player.src = blobUrl;
+  } catch(e) {
+    player.src = videoUrl;
+  }
   document.getElementById('video-overlay').classList.remove('hidden');
   player.play().catch(e => console.warn('Autoplay prevented', e));
 }
@@ -707,6 +737,7 @@ function closeVideoModal() {
   const player = document.getElementById('run-video-player');
   player.pause();
   player.src = '';
+  if (player._blobUrl) { URL.revokeObjectURL(player._blobUrl); player._blobUrl = null; }
 }
 
 function backToLogRecipes() {

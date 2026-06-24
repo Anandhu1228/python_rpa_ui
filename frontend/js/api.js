@@ -111,6 +111,12 @@ const API = {
     return r.json();
   },
 
+  async stopRun(jobId) {
+    const r = await this._fetch(`/api/run/${jobId}/stop`, { method: 'POST' });
+    if (!r.ok) throw new Error('Failed to stop run');
+    return r.json();
+  },
+
   async submitRunAction(jobId, response) {
     const r = await this._fetch(`/api/run/${jobId}/action`, {
       method: 'POST',

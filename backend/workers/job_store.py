@@ -24,6 +24,7 @@ class Job:
     logs: List[str] = field(default_factory=list)  # Keep in memory for fast websocket reads
     pending_action: Optional[dict] = None
     action_response: Optional[str] = None
+    stop_requested: bool = False
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 class JobStore:
@@ -139,6 +140,16 @@ class JobStore:
             ]
             jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
             return jobs_list
+
+    def request_stop(self, job_id: str):
+        job = self.get(job_id)
+        if job:
+            with job._lock:
+                job.stop_requested = True
+
+    def is_stop_requested(self, job_id: str) -> bool:
+        job = self.get(job_id)
+        return job.stop_requested if job else False
 
     def set_pending_action(self, job_id: str, action: dict):
         job = self.get(job_id)

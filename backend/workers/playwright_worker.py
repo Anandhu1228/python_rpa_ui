@@ -640,7 +640,8 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
                 except Exception:
                     continue
         if not found:
-            log(job_id, f"    ⚠ Step '{label}' — selector '{wait_sel}' not found")
+            log(job_id, f"    ✗ Step '{label}' — wait_for_selector '{wait_sel}' not found (step failed)")
+            return False, page
 
     for _tf in _step_temp_files:
         if _tf.exists():
@@ -721,6 +722,11 @@ def run_job(job_id: str, recipe: Dict, data_path: str, start_row: int = 1, end_r
                 log(job_id, f"[{i}/{end_idx}] Row: {row_id}")
                 log(job_id, f"{'='*56}")
                 ulog(job_id, "row_start", row_num=i, row_total=end_idx, row_id=row_id)
+
+                if job_store.is_stop_requested(job_id):
+                    log(job_id, "  🛑 Stop requested by user — finishing after current row.")
+                    ulog(job_id, "info", msg="Run stopped by user.")
+                    break
 
                 row_ok = True
                 active_page = page

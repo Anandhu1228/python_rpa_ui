@@ -60,6 +60,15 @@ async def start_run(
     return {"job_id": job_id, "status": "running"}
 
 
+@router.post("/run/{job_id}/stop")
+async def stop_run(job_id: str):
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+    job_store.request_stop(job_id)
+    return {"success": True}
+
+
 @router.post("/run/{job_id}/action")
 async def submit_action(job_id: str, req: ActionReq):
     job_store.set_action_response(job_id, req.response)
