@@ -120,6 +120,33 @@ def resolve_frame(page, selector: str, timeout_ms: int = 4000):
     return page, page.locator(selector).first
 
 
+def check_error(page, step: Dict, action_to: int):
+    """Check for a page error after submit using error_selector.
+    Returns (found: bool, error_text: str).
+    Checks main page then iframes. Only matches visible elements.
+    If error_text_contains is set, also checks inner text."""
+    error_sel = step.get("error_selector", "")
+    if not error_sel:
+        return False, ""
+    text_contains = step.get("error_text_contains", "")
+    short_to = min(action_to, 3000)
+    for ctx in [page] + [fr for fr in page.frames if fr != page.main_frame]:
+        try:
+            loc = ctx.locator(error_sel).first
+            loc.wait_for(state="visible", timeout=short_to)
+            inner = ""
+            try:
+                inner = loc.inner_text(timeout=short_to).strip()
+            except Exception:
+                pass
+            if text_contains and text_contains not in inner:
+                continue
+            return True, inner
+        except Exception:
+            continue
+    return False, ""
+
+
 # ──────────────────────────────────────────────────────────────
 #  Field-filling logic
 # ──────────────────────────────────────────────────────────────
@@ -471,6 +498,11 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
     page_to   = delay.get("page_load_timeout_ms", 15000)
     action_to = delay.get("action_timeout_ms", 8000)
 
+    on_error    = step.get("on_error", "fail")
+    max_retries = int(step.get("max_retries", 2) or 2)
+    dismiss_dialogs = step.get("dismiss_dialogs", False)
+    dialog_action   = step.get("dialog_action", "accept")
+
     if step.get("skip_if_no_data", False):
         has_data = any(
             resolve_value(fm, row)
@@ -487,171 +519,258 @@ def execute_step(page, step: Dict, row: Dict[str, str], delay: Dict, job_id: str
         page.goto(url)
         page.wait_for_load_state("networkidle", timeout=page_to)
 
-    _step_temp_files = []
-    for fm in step.get("field_mappings", []):
-        try:
-            fill_field(page, fm, row, delay, job_id, temp_files=_step_temp_files)
-            human_delay(delay.get("between_fields_ms", 100))
-        except FieldError as e:
-            log(job_id, f"    ⚠ {e}")
+    human_input_mappings = [
+        fm for fm in step.get("field_mappings", [])
+        if fm.get("field_type") == "human_input"
+        or (fm.get("field_type") == "split_fill" and fm.get("source") == "human_input")
+    ]
 
-    # CAPTCHA / Human Handoff
-    cap_img_sel = step.get("captcha_image_selector", "")
-    cap_inp_sel = step.get("captcha_input_selector", "")
-    if cap_img_sel and cap_inp_sel:
-        log(job_id, f"    → [Human Handoff] Waiting for image/canvas '{cap_img_sel}'...")
-        try:
-            import base64
-            # Try main page then iframes
-            frame_obj = page
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            log(job_id, f"    ↩ [{label}] Retrying (attempt {attempt} of {max_retries})...")
+            ulog(job_id, "retrying", label=label, attempt=attempt, max_retries=max_retries)
+            for fm in human_input_mappings:
+                try:
+                    fill_field(page, fm, row, delay, job_id)
+                    human_delay(delay.get("between_fields_ms", 100))
+                except FieldError as e:
+                    log(job_id, f"    ⚠ {e}")
+        else:
+            _step_temp_files = []
+            for fm in step.get("field_mappings", []):
+                try:
+                    fill_field(page, fm, row, delay, job_id, temp_files=_step_temp_files)
+                    human_delay(delay.get("between_fields_ms", 100))
+                except FieldError as e:
+                    log(job_id, f"    ⚠ {e}")
+
+            # CAPTCHA / Human Handoff
+            cap_img_sel = step.get("captcha_image_selector", "")
+            cap_inp_sel = step.get("captcha_input_selector", "")
+            if cap_img_sel and cap_inp_sel:
+                log(job_id, f"    → [Human Handoff] Waiting for image/canvas '{cap_img_sel}'...")
+                try:
+                    import base64
+                    # Try main page then iframes
+                    frame_obj = page
+                    try:
+                        el_check = page.locator(cap_img_sel).first
+                        el_check.wait_for(state="visible", timeout=action_to)
+                    except Exception:
+                        for fr in page.frames:
+                            if fr == page.main_frame:
+                                continue
+                            try:
+                                el_check = fr.locator(cap_img_sel).first
+                                el_check.wait_for(state="visible", timeout=2000)
+                                frame_obj = fr
+                                break
+                            except Exception:
+                                continue
+
+                    el = frame_obj.locator(cap_img_sel).first
+                    el.wait_for(state="visible", timeout=action_to)
+                    img_bytes = el.screenshot(timeout=action_to)
+                    b64 = base64.b64encode(img_bytes).decode('utf-8')
+
+                    log(job_id, "    → [Human Handoff] Action required: Waiting for user to solve CAPTCHA via Chat...")
+                    ulog(job_id, "captcha", image_b64=b64)
+                    job_store.set_pending_action(job_id, {"type": "captcha", "image_b64": b64})
+
+                    waited = 0
+                    resp = None
+                    while waited < 300:
+                        resp = job_store.get_action_response(job_id)
+                        if resp:
+                            break
+                        time.sleep(1)
+                        waited += 1
+
+                    job_store.clear_action(job_id)
+
+                    if not resp:
+                        log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
+                        ulog(job_id, "captcha_timeout")
+                        return False, page
+
+                    log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
+                    ulog(job_id, "captcha_answer", answer=resp)
+
+                    inp_frame, inp_el = resolve_frame(page, cap_inp_sel, action_to)
+                    inp_el.wait_for(state="visible", timeout=action_to)
+                    inp_el.fill(resp, timeout=action_to)
+                    human_delay(delay.get("between_fields_ms", 100))
+
+                except Exception as e:
+                    log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
+                    job_store.clear_action(job_id)
+
+        # Dialog handling — register before submit click
+        _dialog_log = []
+        def _handle_dialog(dialog, _da=dialog_action, _dl=_dialog_log):
+            msg = dialog.message
+            if _da == "dismiss":
+                dialog.dismiss()
+                _dl.append(("dismiss", msg))
+            else:
+                dialog.accept()
+                _dl.append(("accept", msg))
+
+        if dismiss_dialogs:
+            page.on("dialog", _handle_dialog)
+
+        # Submit
+        submit_sel  = step.get("submit_selector", "")
+        opens_new_tab = step.get("opens_new_tab", False)
+
+        if submit_sel:
             try:
-                el_check = page.locator(cap_img_sel).first
-                el_check.wait_for(state="visible", timeout=action_to)
+                if opens_new_tab:
+                    log(job_id, f"    → [{label}] Clicking (expects new tab)...")
+                    ulog(job_id, "click", label=label, selector=submit_sel, context="new tab")
+                    with page.context.expect_page() as new_page_info:
+                        page.locator(submit_sel).first.click(timeout=action_to)
+                    new_page = new_page_info.value
+                    new_page.wait_for_load_state("networkidle", timeout=page_to)
+                    log(job_id, f"    ✓ New tab opened: {new_page.url}")
+                    ulog(job_id, "new_tab", url=new_page.url)
+                    return True, new_page
+                else:
+                    # Try main page first, then iframes
+                    clicked = False
+                    try:
+                        page.locator(submit_sel).first.click(timeout=action_to)
+                        clicked = True
+                    except Exception:
+                        pass
+                    if not clicked:
+                        for fr in page.frames:
+                            if fr == page.main_frame:
+                                continue
+                            try:
+                                fr.locator(submit_sel).first.click(timeout=2000)
+                                clicked = True
+                                log(job_id, f"    → [{label}] Clicked inside iframe")
+                                break
+                            except Exception:
+                                continue
+                    if not clicked:
+                        raise Exception(f"Could not find submit selector '{submit_sel}' on page or any iframe")
+                    log(job_id, f"    → [{label}] Clicked '{submit_sel}'")
+                    ulog(job_id, "click", label=label, selector=submit_sel, context="same tab")
+            except Exception as e:
+                if dismiss_dialogs:
+                    try:
+                        page.remove_listener("dialog", _handle_dialog)
+                    except Exception:
+                        pass
+                log(job_id, f"    ✗ Submit failed on step '{label}': {e}")
+                return False, page
+
+        if dismiss_dialogs:
+            for act, msg in _dialog_log:
+                log(job_id, f"    → [Dialog] {act}ed native dialog: {msg!r}")
+                ulog(job_id, "dialog_handled", action=act, message=msg)
+            try:
+                page.remove_listener("dialog", _handle_dialog)
             except Exception:
+                pass
+
+        # Error check — runs immediately after submit, before URL/selector waits
+        err_found, err_text = check_error(page, step, action_to)
+        if err_found:
+            log(job_id, f"    ✗ [{label}] Page error detected: {err_text!r}")
+            ulog(job_id, "step_error", label=label, error_text=err_text, attempt=attempt)
+            if on_error == "fail" or attempt >= max_retries:
+                if attempt >= max_retries and on_error != "fail":
+                    log(job_id, f"    ✗ [{label}] Max retries ({max_retries}) reached — failing row.")
+                    ulog(job_id, "retry_exhausted", label=label, max_retries=max_retries)
+                return False, page
+            if on_error == "retry":
+                if not human_input_mappings:
+                    log(job_id, f"    ✗ [{label}] on_error=retry but no human_input fields to re-ask — failing row.")
+                    return False, page
+                continue
+            if on_error == "ask":
+                log(job_id, f"    → [{label}] Asking operator: retry or fail?")
+                ulog(job_id, "step_error_ask", label=label, error_text=err_text, attempt=attempt, options=["retry", "fail"])
+                job_store.set_pending_action(job_id, {"type": "step_error", "label": label, "error_text": err_text, "options": ["retry", "fail"]})
+                waited = 0
+                op_resp = None
+                while waited < 300:
+                    op_resp = job_store.get_action_response(job_id)
+                    if op_resp:
+                        break
+                    time.sleep(1)
+                    waited += 1
+                job_store.clear_action(job_id)
+                if not op_resp or op_resp.strip().lower() == "fail":
+                    log(job_id, f"    ✗ [{label}] Operator chose to fail row.")
+                    return False, page
+                if human_input_mappings:
+                    continue
+                log(job_id, f"    ✗ [{label}] Operator chose retry but no human_input fields to re-ask — failing row.")
+                return False, page
+
+        # Wait for URL
+        wait_url = step.get("wait_for_url", "")
+        if wait_url:
+            try:
+                page.wait_for_url(f"**{wait_url}**", timeout=page_to)
+                log(job_id, f"    ✓ Step '{label}' — reached {page.url}")
+                ulog(job_id, "reached", label=label, url=page.url)
+            except Exception:
+                errors = []
+                try:
+                    errors = page.locator(
+                        ".error, .errorlist, [class*='error'], .alert-danger, .alert"
+                    ).all_text_contents()
+                except Exception:
+                    pass
+                log(job_id, f"    ✗ Step '{label}' — expected URL '{wait_url}', got {page.url}")
+                if errors:
+                    clean = [e.strip() for e in errors if e.strip()]
+                    log(job_id, f"    ✗ Page errors: {clean}")
+                return False, page
+
+        # Wait for selector (try page + iframes)
+        wait_sel = step.get("wait_for_selector", "")
+        if wait_sel:
+            found = False
+            try:
+                page.wait_for_selector(wait_sel, timeout=page_to)
+                found = True
+            except Exception:
+                pass
+            if not found:
                 for fr in page.frames:
                     if fr == page.main_frame:
                         continue
                     try:
-                        el_check = fr.locator(cap_img_sel).first
-                        el_check.wait_for(state="visible", timeout=2000)
-                        frame_obj = fr
+                        fr.wait_for_selector(wait_sel, timeout=2000)
+                        found = True
                         break
                     except Exception:
                         continue
-
-            el = frame_obj.locator(cap_img_sel).first
-            el.wait_for(state="visible", timeout=action_to)
-            img_bytes = el.screenshot(timeout=action_to)
-            b64 = base64.b64encode(img_bytes).decode('utf-8')
-
-            log(job_id, "    → [Human Handoff] Action required: Waiting for user to solve CAPTCHA via Chat...")
-            ulog(job_id, "captcha", image_b64=b64)
-            job_store.set_pending_action(job_id, {"type": "captcha", "image_b64": b64})
-
-            waited = 0
-            resp = None
-            while waited < 300:
-                resp = job_store.get_action_response(job_id)
-                if resp:
-                    break
-                time.sleep(1)
-                waited += 1
-
-            job_store.clear_action(job_id)
-
-            if not resp:
-                log(job_id, "    ✗ [Human Handoff] Timed out waiting for response (5 mins).")
-                ulog(job_id, "captcha_timeout")
+            if not found:
+                log(job_id, f"    ✗ Step '{label}' — wait_for_selector '{wait_sel}' not found (step failed)")
                 return False, page
 
-            log(job_id, f"    ✓ [Human Handoff] Received response. Filling field...")
-            ulog(job_id, "captcha_answer", answer=resp)
+        if attempt > 0:
+            log(job_id, f"    ✓ [{label}] Retry succeeded on attempt {attempt}.")
+            ulog(job_id, "retry_success", label=label, attempt=attempt)
 
-            inp_frame, inp_el = resolve_frame(page, cap_inp_sel, action_to)
-            inp_el.wait_for(state="visible", timeout=action_to)
-            inp_el.fill(resp, timeout=action_to)
-            human_delay(delay.get("between_fields_ms", 100))
-
-        except Exception as e:
-            log(job_id, f"    ✗ [Human Handoff] Failed: {e}")
-            job_store.clear_action(job_id)
-
-    # Submit
-    submit_sel  = step.get("submit_selector", "")
-    opens_new_tab = step.get("opens_new_tab", False)
-
-    if submit_sel:
-        try:
-            if opens_new_tab:
-                log(job_id, f"    → [{label}] Clicking (expects new tab)...")
-                ulog(job_id, "click", label=label, selector=submit_sel, context="new tab")
-                with page.context.expect_page() as new_page_info:
-                    page.locator(submit_sel).first.click(timeout=action_to)
-                new_page = new_page_info.value
-                new_page.wait_for_load_state("networkidle", timeout=page_to)
-                log(job_id, f"    ✓ New tab opened: {new_page.url}")
-                ulog(job_id, "new_tab", url=new_page.url)
-                return True, new_page
-            else:
-                # Try main page first, then iframes
-                clicked = False
+        for _tf in _step_temp_files:
+            if _tf.exists():
                 try:
-                    page.locator(submit_sel).first.click(timeout=action_to)
-                    clicked = True
+                    _tf.unlink()
+                    log(job_id, f"    → [file_upload] temp file '{_tf.name}' removed.")
                 except Exception:
                     pass
-                if not clicked:
-                    for fr in page.frames:
-                        if fr == page.main_frame:
-                            continue
-                        try:
-                            fr.locator(submit_sel).first.click(timeout=2000)
-                            clicked = True
-                            log(job_id, f"    → [{label}] Clicked inside iframe")
-                            break
-                        except Exception:
-                            continue
-                if not clicked:
-                    raise Exception(f"Could not find submit selector '{submit_sel}' on page or any iframe")
-                log(job_id, f"    → [{label}] Clicked '{submit_sel}'")
-                ulog(job_id, "click", label=label, selector=submit_sel, context="same tab")
-        except Exception as e:
-            log(job_id, f"    ✗ Submit failed on step '{label}': {e}")
-            return False, page
 
-    # Wait for URL
-    wait_url = step.get("wait_for_url", "")
-    if wait_url:
-        try:
-            page.wait_for_url(f"**{wait_url}**", timeout=page_to)
-            log(job_id, f"    ✓ Step '{label}' — reached {page.url}")
-            ulog(job_id, "reached", label=label, url=page.url)
-        except Exception:
-            errors = []
-            try:
-                errors = page.locator(
-                    ".error, .errorlist, [class*='error'], .alert-danger, .alert"
-                ).all_text_contents()
-            except Exception:
-                pass
-            log(job_id, f"    ✗ Step '{label}' — expected URL '{wait_url}', got {page.url}")
-            if errors:
-                clean = [e.strip() for e in errors if e.strip()]
-                log(job_id, f"    ✗ Page errors: {clean}")
-            return False, page
+        return True, page
 
-    # Wait for selector (try page + iframes)
-    wait_sel = step.get("wait_for_selector", "")
-    if wait_sel:
-        found = False
-        try:
-            page.wait_for_selector(wait_sel, timeout=page_to)
-            found = True
-        except Exception:
-            pass
-        if not found:
-            for fr in page.frames:
-                if fr == page.main_frame:
-                    continue
-                try:
-                    fr.wait_for_selector(wait_sel, timeout=2000)
-                    found = True
-                    break
-                except Exception:
-                    continue
-        if not found:
-            log(job_id, f"    ✗ Step '{label}' — wait_for_selector '{wait_sel}' not found (step failed)")
-            return False, page
-
-    for _tf in _step_temp_files:
-        if _tf.exists():
-            try:
-                _tf.unlink()
-                log(job_id, f"    → [file_upload] temp file '{_tf.name}' removed.")
-            except Exception:
-                pass
-
-    return True, page
+    return False, page
 
 
 # ──────────────────────────────────────────────────────────────

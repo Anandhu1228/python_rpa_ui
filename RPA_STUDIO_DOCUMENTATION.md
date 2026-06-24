@@ -155,7 +155,13 @@ This is the Pydantic model in `recipe_router.py` — the exact shape saved to `s
   "wait_for_url": "string (optional — substring match against the post-submit URL)",
   "wait_for_selector": "string (optional — if set, the step is considered failed if this selector is not found within page_load_timeout_ms; use this as a success indicator, e.g. an element that only appears on the happy path)",
   "skip_if_no_data": false,
-  "opens_new_tab": false
+  "opens_new_tab": false,
+  "error_selector": "string (optional — CSS selector for an element that signals failure, e.g. '#send_err:not(:empty)' or '.toast-error')",
+  "error_text_contains": "string (optional — only treat error_selector as an error when its inner text contains this string)",
+  "on_error": "fail",
+  "max_retries": 2,
+  "dismiss_dialogs": false,
+  "dialog_action": "accept"
 }
 ```
 
@@ -626,3 +632,59 @@ When `file_upload` is selected as the field type in a mapping row, a **"File Upl
 - **Max size (MB)** number input: `0` = no limit; set `2` to enforce strictly less than 2 MB
 
 These values are saved into the recipe JSON as `file_source`, `file_accept` and `file_max_mb` on the mapping object and round-trip correctly through Download JSON / Upload JSON.
+
+---
+
+## 22. Error handling per step (`error_selector`, `on_error`, `max_retries`, `dismiss_dialogs`)
+
+Added to detect page-level errors after submit and optionally retry steps that have `human_input` fields.
+
+### New FlowStep fields
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `error_selector` | string | `""` | CSS selector for an element that signals failure (e.g. `#send_err:not(:empty)`, `.toast-error`, `.invalid-feedback`). After submit, the worker checks whether this element is **visible** on the page (main frame or any iframe). If found, the step is treated as failed. |
+| `error_text_contains` | string | `""` | Optional refinement: only count the `error_selector` match as an error when the element's inner text contains this string. Useful when the error container is always in the DOM but only filled when there is an actual error. Leave blank to match on visibility alone. |
+| `on_error` | `"fail"` \| `"retry"` \| `"ask"` | `"fail"` | What to do when `error_selector` fires. `fail` = mark row failed immediately. `retry` = re-ask all `human_input` / `split_fill[source=human_input]` fields in this step and submit again. `ask` = pause and show the operator the error text with **Retry** and **Fail Row** buttons. |
+| `max_retries` | integer | `2` | Maximum number of retry attempts. Only relevant when `on_error` is `retry` or `ask`. After this many attempts the row is failed regardless. |
+| `dismiss_dialogs` | boolean | `false` | When true, registers a Playwright `dialog` event handler before the submit click to auto-handle native browser `alert()`, `confirm()`, and `beforeunload` dialogs. Without this, headless Playwright silently dismisses them; with this the action is logged explicitly. |
+| `dialog_action` | `"accept"` \| `"dismiss"` | `"accept"` | Only relevant when `dismiss_dialogs` is true. `accept` = click OK / Yes on `confirm()` dialogs. `dismiss` = click Cancel / No. For plain `alert()` both values result in dismissal (the dialog is closed regardless). |
+
+### How the retry loop works (`playwright_worker.py` → `execute_step`)
+
+The full field-fill + submit + error-check block is wrapped in a `for attempt in range(max_retries + 1)` loop.
+
+- **Attempt 0 (first try):** All field mappings are filled normally, CAPTCHA handoff runs if configured, submit is clicked.
+- **After submit:** `check_error()` runs immediately with a short timeout (≤ 3 seconds, not the full `page_load_timeout_ms`). It checks `error_selector` on the main page then all iframes, checks visibility, and optionally checks inner text against `error_text_contains`.
+- **If no error:** `wait_for_url` and `wait_for_selector` checks run as normal. Step succeeds.
+- **If error found and `on_error = "fail"`:** Return `False` immediately — row fails.
+- **If error found and `on_error = "retry"`:** If the step has no `human_input` / `split_fill[source=human_input]` fields, fail immediately (nothing to re-ask). Otherwise log the error, emit a `retrying` ulog event, and continue the loop — on the next iteration only the human_input fields are re-filled (the URL navigation and non-human fields are not re-run, since the page stayed in place).
+- **If error found and `on_error = "ask"`:** Emit a `step_error_ask` ulog event and call `job_store.set_pending_action(job_id, {"type": "step_error", ...})`. The worker blocks for up to 5 minutes. The frontend shows the error text and **Retry** / **Fail Row** buttons. If the operator picks Retry, the loop continues (same behaviour as `retry`). If they pick Fail or the wait times out, the row fails.
+- **If `max_retries` is exhausted:** Emit a `retry_exhausted` ulog event and return `False`.
+
+### Dialog handling
+
+The `dismiss_dialogs` flag is checked once per attempt, right before the submit click. A `dialog` event listener is registered on `page`. After the submit click completes (or fails), the listener is removed. All dialog events that fired during the click are logged to both the developer log and the user feed as `dialog_handled` ulog events, showing the action taken (`accept` or `dismiss`) and the dialog message.
+
+### New ulog event types
+
+| Event `_t` | Fields | When emitted |
+|---|---|---|
+| `step_error` | `label`, `error_text`, `attempt` | Error detected; `on_error = "fail"` or logging before retry |
+| `step_error_ask` | `label`, `error_text`, `attempt`, `options` | Error detected; `on_error = "ask"`, waiting for operator decision |
+| `retrying` | `label`, `attempt`, `max_retries` | About to re-run human_input fields for another attempt |
+| `retry_success` | `label`, `attempt` | A retry attempt reached the step's success condition |
+| `retry_exhausted` | `label`, `max_retries` | All retry attempts used up; row will fail |
+| `dialog_handled` | `action`, `message` | A native browser dialog was auto-handled |
+
+### Flow Builder UI
+
+Each step's editor now has an **Error Handling** collapsible section (always visible, not behind a checkbox) with:
+- **Error selector** text input — the CSS selector to watch for after submit.
+- **Error text contains** text input — optional inner-text filter.
+- **On error** dropdown — `fail / retry / ask`.
+- **Max retries** number input — shown whenever `on_error` is not `fail`.
+- **Auto-dismiss native browser dialogs** checkbox.
+- **Dialog action** dropdown (`accept / dismiss`) — shown when the checkbox is ticked.
+
+All new fields default to their safe no-op values (`error_selector: ""`, `on_error: "fail"`, `dismiss_dialogs: false`) so existing recipes continue to behave identically without any changes.

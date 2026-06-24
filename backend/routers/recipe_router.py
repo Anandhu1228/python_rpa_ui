@@ -36,6 +36,14 @@ class FlowStep(BaseModel):
     skip_if_no_data: bool = False           # skip step if all mapped columns are empty
     opens_new_tab: bool = False             # click opens a new browser tab — switch to it
 
+    # NEW: Error handling
+    error_selector: Optional[str] = None           # CSS selector for an element that signals failure
+    error_text_contains: Optional[str] = None      # optional: only match error_selector when its text contains this string
+    on_error: Optional[str] = "fail"               # "fail" | "retry" | "ask"
+    max_retries: Optional[int] = 2                 # max retry attempts when on_error is retry or ask
+    dismiss_dialogs: Optional[bool] = False        # auto-dismiss native browser alert/confirm/prompt dialogs
+    dialog_action: Optional[str] = "accept"        # "accept" | "dismiss" — used when dismiss_dialogs is true
+
 
 class DelayConfig(BaseModel):
     between_records_ms: int = 800       # ms between each CSV row

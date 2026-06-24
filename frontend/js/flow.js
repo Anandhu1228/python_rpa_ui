@@ -22,7 +22,13 @@ function addFlowStep() {
     inspection_steps: [], 
     requires_captcha: false,
     captcha_image_selector: '',
-    captcha_input_selector: ''
+    captcha_input_selector: '',
+    error_selector: '',
+    error_text_contains: '',
+    on_error: 'fail',
+    max_retries: 2,
+    dismiss_dialogs: false,
+    dialog_action: 'accept'
   });
   renderFlowSteps();
 }
@@ -40,7 +46,7 @@ function toggleStep(id) {
 function updateStep(id, key, val) {
   const s = flowSteps.find(s => s._id === id);
   if (s) s[key] = val;
-  if (key === 'requires_captcha' || key === 'opens_new_tab') renderFlowSteps();
+  if (key === 'requires_captcha' || key === 'opens_new_tab' || key === 'on_error' || key === 'dismiss_dialogs' || key === 'error_selector') renderFlowSteps();
 }
 
 function moveStep(id, dir) {
@@ -450,6 +456,45 @@ function renderFlowSteps() {
             </div>
           </div>
 
+          <div style="grid-column:1/-1; background: var(--bg2); padding: .75rem; border: 1px solid var(--border2); border-radius: var(--radius-sm); margin-top: .5rem;">
+            <div style="font-size: .85rem; font-weight: 600; color: var(--accent); margin-bottom: .5rem;">Error Handling</div>
+            <div class="form-grid">
+              <div class="form-group">
+                <label>Error selector</label>
+                <input class="input" placeholder="e.g. #send_err:not(:empty)" value="${esc(step.error_selector||'')}" onchange="updateStep('${step._id}','error_selector',this.value)">
+              </div>
+              <div class="form-group">
+                <label>Error text contains <span class="badge">optional</span></label>
+                <input class="input" placeholder="e.g. Invalid OTP" value="${esc(step.error_text_contains||'')}" onchange="updateStep('${step._id}','error_text_contains',this.value)">
+              </div>
+              <div class="form-group">
+                <label>On error</label>
+                <select class="input" onchange="updateStep('${step._id}','on_error',this.value)">
+                  <option value="fail" ${(step.on_error||'fail')==='fail'?'selected':''}>fail — mark row failed</option>
+                  <option value="retry" ${(step.on_error||'fail')==='retry'?'selected':''}>retry — re-ask human_input fields</option>
+                  <option value="ask" ${(step.on_error||'fail')==='ask'?'selected':''}>ask — prompt operator: retry or fail</option>
+                </select>
+              </div>
+              <div class="form-group" style="${(step.on_error||'fail')==='fail' ? 'display:none' : ''}">
+                <label>Max retries</label>
+                <input class="input" type="number" min="1" max="10" value="${step.max_retries != null ? step.max_retries : 2}" onchange="updateStep('${step._id}','max_retries',parseInt(this.value)||2)">
+              </div>
+              <div class="form-group" style="grid-column:1/-1;">
+                <label class="toggle-label">
+                  <input type="checkbox" ${step.dismiss_dialogs ? 'checked' : ''} onchange="updateStep('${step._id}','dismiss_dialogs',this.checked)">
+                  Auto-dismiss native browser dialogs (alert / confirm)
+                </label>
+              </div>
+              <div class="form-group" style="${step.dismiss_dialogs ? '' : 'display:none'}">
+                <label>Dialog action</label>
+                <select class="input" onchange="updateStep('${step._id}','dialog_action',this.value)">
+                  <option value="accept" ${(step.dialog_action||'accept')==='accept'?'selected':''}>accept (OK / Yes)</option>
+                  <option value="dismiss" ${(step.dialog_action||'accept')==='dismiss'?'selected':''}>dismiss (Cancel / No)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
           <div class="form-group">
             <label>Submit selector</label>
             <input class="input" value="${esc(step.submit_selector)}"
@@ -789,6 +834,12 @@ function buildRecipePayload() {
     wait_for_url: s.wait_for_url || '',
     wait_for_selector: s.wait_for_selector || '',
     skip_if_no_data: !!s.skip_if_no_data,
+    error_selector: s.error_selector || '',
+    error_text_contains: s.error_text_contains || '',
+    on_error: s.on_error || 'fail',
+    max_retries: s.max_retries != null ? parseInt(s.max_retries) || 2 : 2,
+    dismiss_dialogs: !!s.dismiss_dialogs,
+    dialog_action: s.dialog_action || 'accept',
   }));
 
   return {
@@ -841,6 +892,12 @@ function loadRecipeIntoFlow(recipe) {
       _id: Date.now() + Math.random(),
       fields: (is.fields || []).map(f => ({...f}))
     })),
+    error_selector: s.error_selector || '',
+    error_text_contains: s.error_text_contains || '',
+    on_error: s.on_error || 'fail',
+    max_retries: s.max_retries != null ? s.max_retries : 2,
+    dismiss_dialogs: !!s.dismiss_dialogs,
+    dialog_action: s.dialog_action || 'accept',
     field_mappings: (s.field_mappings || []).map(m => ({
       ...m, 
       _id: Date.now() + Math.random(),

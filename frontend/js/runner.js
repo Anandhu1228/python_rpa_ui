@@ -197,14 +197,38 @@ function handleRunAction(action) {
     const terminal = document.getElementById('log-terminal');
     terminal.scrollTop = terminal.scrollHeight;
   }
+  if (action.type === 'step_error') {
+    actionCard.classList.remove('hidden');
+    document.getElementById('action-content').innerHTML = `
+      <div style="color:var(--red); font-weight:600; margin-bottom:.4rem;">⚠️ Page error on step "${esc(action.label || '')}"</div>
+      ${action.error_text ? `<div style="font-size:.85rem; color:var(--text2); margin-bottom:.5rem; word-break:break-word;">${esc(action.error_text)}</div>` : ''}
+      <div class="row gap-sm">
+        <button class="btn btn-primary btn-sm" onclick="submitRunAction(currentJobId,'retry')">↩ Retry</button>
+        <button class="btn btn-danger btn-sm" onclick="submitRunAction(currentJobId,'fail')">✗ Fail Row</button>
+      </div>`;
+    document.getElementById('action-input').style.display = 'none';
+    document.querySelector('#interactive-action-card button.btn-primary[onclick="submitRunAction()"]') && (document.querySelector('#interactive-action-card button.btn-primary[onclick="submitRunAction()"]').style.display = 'none');
+    const feed = document.getElementById('log-user-feed');
+    feed.scrollTop = feed.scrollHeight;
+  } else {
+    document.getElementById('action-input').style.display = '';
+    const submitBtn = document.querySelector('#interactive-action-card > .row > button.btn-primary');
+    if (submitBtn) submitBtn.style.display = '';
+  }
 }
 
-async function submitRunAction() {
-  const val = document.getElementById('action-input').value.trim();
+async function submitRunAction(jobId, response) {
+  const jid = jobId || currentJobId;
+  let val = response;
+  if (!val) {
+    val = document.getElementById('action-input').value.trim();
+  }
   if (!val) return;
   try {
-    await API.submitRunAction(currentJobId, val);
+    await API.submitRunAction(jid, val);
     document.getElementById('interactive-action-card').classList.add('hidden');
+    document.getElementById('action-input').style.display = '';
+    document.getElementById('action-input').value = '';
     appendDevLog('Sent response to bot.', 'log-info');
   } catch (e) {
     alert('Failed to send answer: ' + e.message);
@@ -602,6 +626,50 @@ function _buildUserEventNode(ev) {
     case 'file_attached': {
       wrap.style.marginLeft = '1.5rem';
       wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ Attached: <strong>${esc(ev.filename)}</strong></div>`;
+      break;
+    }
+
+    case 'step_error': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `
+        <div class="uf-bubble uf-err" style="flex-direction:column; align-items:flex-start; gap:.3rem;">
+          <div>⚠️ <strong>Error detected on step "${esc(ev.label)}"</strong></div>
+          ${ev.error_text ? `<div style="font-size:.8rem; opacity:.85; word-break:break-word;">${esc(ev.error_text)}</div>` : ''}
+        </div>`;
+      break;
+    }
+
+    case 'step_error_ask': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `
+        <div class="uf-bubble uf-err" style="flex-direction:column; align-items:flex-start; gap:.3rem;">
+          <div>⚠️ <strong>Error on step "${esc(ev.label)}" — operator decision needed</strong></div>
+          ${ev.error_text ? `<div style="font-size:.8rem; opacity:.85; word-break:break-word;">${esc(ev.error_text)}</div>` : ''}
+        </div>`;
+      break;
+    }
+
+    case 'retrying': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-action">↩ Retrying step "${esc(ev.label)}" (attempt ${ev.attempt} of ${ev.max_retries})…</div>`;
+      break;
+    }
+
+    case 'retry_success': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-ok">✓ Retry succeeded on attempt ${ev.attempt}</div>`;
+      break;
+    }
+
+    case 'retry_exhausted': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-err">✗ Max retries (${ev.max_retries}) reached — row failed</div>`;
+      break;
+    }
+
+    case 'dialog_handled': {
+      wrap.style.marginLeft = '1.5rem';
+      wrap.innerHTML = `<div class="uf-bubble uf-action">💬 Native dialog ${esc(ev.action)}ed: <em>${esc(ev.message)}</em></div>`;
       break;
     }
 
